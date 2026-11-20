@@ -118,15 +118,20 @@ jobs:
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
 
       - name: Unit tests
-        run: ./gradlew :app:testDebugUnitTest --console=plain --stacktrace
+        # "test" runs every module, not just :app. Restricting this to
+        # :app:testDebugUnitTest silently skipped the 420 tests in core/*.
+        run: ./gradlew test --console=plain --stacktrace
 
       - name: Lint
         # Lint reports zero errors on this tree; it fails the job if that changes.
         # Version-update warnings are expected and do not fail.
         run: ./gradlew :app:lintDebug --console=plain
 
-      - name: Assemble debug APK
-        run: ./gradlew :app:assembleDebug --console=plain
+      # The release variant is built here as well as in build.yml: R8 is where
+      # missing-class and keep-rule problems surface, and it must fail CI rather
+      # than only showing up when someone tags a release.
+      - name: Assemble APKs
+        run: ./gradlew assembleDebug assembleRelease --console=plain
 
       - name: Upload test report
         if: always()

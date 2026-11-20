@@ -95,6 +95,19 @@ android {
     }
 }
 
+// Robolectric needs the ui-test-manifest AAR's <activity> declaration, and that AAR
+// is debug-only by design (shipping it in release would put test code in the APK).
+// Without it every Compose render test fails on the release variant with
+// "Unable to resolve activity", which says nothing about the app. The same test
+// sources still run against debug, so release unit tests are turned off rather
+// than left permanently red. Release correctness is covered by the R8 build and
+// the APK assertions in the build workflow.
+androidComponents {
+    beforeVariants(selector().withBuildType("release")) { variant ->
+        variant.enableUnitTest = false
+    }
+}
+
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
