@@ -141,10 +141,12 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
 
-      - name: Refuse to publish a debug-signed tag
+      - name: Warn about a debug-signed tag
+        # A tag built without signing secrets is an operator mistake, not a code
+        # defect, so it warns instead of failing the build. The APK is still
+        # uploaded as a workflow artifact; it just never becomes a release.
         if: startsWith(github.ref, 'refs/tags/v') && steps.verify.outputs.signed == 'debug'
         run: |
-          echo "::error::tag ${{ github.ref_name }} is a release tag but the APK is debug-signed."
+          echo "::warning::tag ${{ github.ref_name }} was built without signing secrets, so no release was published."
           echo "Add SIGNING_KEYSTORE_BASE64, SIGNING_STORE_PASSWORD, SIGNING_KEY_ALIAS"
-          echo "and SIGNING_KEY_PASSWORD as repository secrets, then re-run."
-          exit 1
+          echo "and SIGNING_KEY_PASSWORD as repository secrets, then re-run this workflow."
