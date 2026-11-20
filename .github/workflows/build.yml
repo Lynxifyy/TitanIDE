@@ -1,0 +1,150 @@
+name: Build release APK
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.daemon=false
+
+jobs:
+  release:
+    name: Assemble release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Install SDK packages
+        run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Decode signing keystore
+        # Only runs when the repository has signing secrets configured. Without
+        # them the build falls back to the debug key: still a real, installable,
+        # minified release APK, just not one that can be published to Play.
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$SIGNING_KEYSTORE_BASE64" ]; then
+            echo "::notice::No signing secrets configured; using the debug key for this build."
+            exit 0
+          fi
+          echo "$SIGNING_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/titan-release.jks"
+          echo "TITAN_SIGNING_STORE_FILE=$RUNNER_TEMP/titan-release.jks" >> "$GITHUB_ENV"
+
+      - name: Assemble release
+        env:
+          TITAN_SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          TITAN_SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          TITAN_SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: ./gradlew :app:assembleRelease --console=plain --stacktrace
+
+      - name: Verify the APK
+        id: verify
+        run: |
+          set -u
+          APK=app/build/outputs/apk/release/app-release.apk
+          test -f "$APK" || { echo "::error::no release APK was produced"; exit 1; }
+
+          SIZE=$(stat -c%s "$APK")
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+          echo "Release APK is $SIZE bytes."
+
+          # R8 must actually have run. A release APK in debug-APK territory means
+          # minification silently stopped applying, which is a real regression and
+          # would ship a bloated binary.
+          if [ "$SIZE" -gt 20000000 ]; then
+            echo "::error::release APK is ${SIZE}B, too large; check isMinifyEnabled"
+            exit 1
+          fi
+
+          # apksigner exits non-zero on an unsigned or corrupt APK.
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/apksigner" verify --print-certs "$APK" | tee "$RUNNER_TEMP/certs.txt"
+
+          if grep -q "CN=Android Debug" "$RUNNER_TEMP/certs.txt"; then
+            echo "::warning::APK is debug-signed; configure the signing secrets before publishing"
+            echo "signed=debug" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=release" >> "$GITHUB_OUTPUT"
+          fi
+
+          # Record the version so the release notes do not drift from the artifact.
+          VERSION=$("$BT/aapt2" dump badging "$APK" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -1)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Release version: $VERSION"
+
+      - name: Name the artifact
+        id: name
+        run: |
+          echo "apk=titan-ide-${{ steps.verify.outputs.version }}.apk" >> "$GITHUB_OUTPUT"
+          cp app/build/outputs/apk/release/app-release.apk \
+             "app/build/outputs/apk/release/titan-ide-${{ steps.verify.outputs.version }}.apk"
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: titan-ide-release-apk
+          path: app/build/outputs/apk/release/${{ steps.name.outputs.apk }}
+          retention-days: 30
+
+      - name: Upload R8 mapping
+        # The mapping is what makes a release crash report readable. It is kept
+        # with the APK so a stack trace can be deobfuscated later.
+        uses: actions/upload-artifact@v4
+        with:
+          name: r8-mapping
+          path: app/build/outputs/mapping/release/mapping.txt
+          retention-days: 30
+          if-no-files-found: warn
+
+      # -----------------------------------------------------------------------
+      # Publishing only happens on a version tag, and only with a real signing
+      # key. A debug-signed APK is useful for testing but must never be handed
+      # out as a release.
+      # -----------------------------------------------------------------------
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/v') && steps.verify.outputs.signed == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            app/build/outputs/apk/release/${{ steps.name.outputs.apk }}
+            app/build/outputs/mapping/release/mapping.txt
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+
+      - name: Refuse to publish a debug-signed tag
+        if: startsWith(github.ref, 'refs/tags/v') && steps.verify.outputs.signed == 'debug'
+        run: |
+          echo "::error::tag ${{ github.ref_name }} is a release tag but the APK is debug-signed."
+          echo "Add SIGNING_KEYSTORE_BASE64, SIGNING_STORE_PASSWORD, SIGNING_KEY_ALIAS"
+          echo "and SIGNING_KEY_PASSWORD as repository secrets, then re-run."
+          exit 1
