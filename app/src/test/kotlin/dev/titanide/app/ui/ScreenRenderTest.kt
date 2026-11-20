@@ -49,8 +49,10 @@ class ScreenRenderTest {
     @get:Rule
     val compose = createComposeRule()
 
-    private fun render(screen: @Composable () -> Unit) {
-        val container = TitanContainer(ApplicationProvider.getApplicationContext())
+    private fun render(screen: @Composable () -> Unit) =
+        renderWith(TitanContainer(ApplicationProvider.getApplicationContext()), screen)
+
+    private fun renderWith(container: TitanContainer, screen: @Composable () -> Unit) {
         compose.setContent {
             CompositionLocalProvider(LocalContainer provides container) {
                 TitanTheme { screen() }
@@ -90,13 +92,12 @@ class ScreenRenderTest {
     }
 
     @Test
-    fun workbenchRenders() = render {
-        val container = LocalContainer.current
-        WorkbenchScreen(
-            viewModel = WorkbenchViewModel(container),
-            onOpenSettings = {},
-            onOpenProjects = {},
-        )
+    fun workbenchRenders() {
+        val container = TitanContainer(ApplicationProvider.getApplicationContext())
+        val viewModel = WorkbenchViewModel(container)
+        renderWith(container) {
+            WorkbenchScreen(viewModel = viewModel, onOpenSettings = {}, onOpenProjects = {})
+        }
     }
 
     @Test

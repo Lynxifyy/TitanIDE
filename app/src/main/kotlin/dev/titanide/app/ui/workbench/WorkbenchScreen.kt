@@ -250,7 +250,7 @@ fun WorkbenchScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = 0.5f))
-                    .androidxClickable { viewModel.closeSidebar() },
+                    .clickable { viewModel.closeSidebar() },
             )
             AnimatedVisibility(
                 visible = state.sidebarVisible,
@@ -290,7 +290,7 @@ fun WorkbenchScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = 0.5f))
-                    .androidxClickable { viewModel.toggleAgentPanel() },
+                    .clickable { viewModel.toggleAgentPanel() },
             )
             AnimatedVisibility(
                 visible = state.agentPanelVisible,
@@ -471,7 +471,7 @@ private fun ViewModeTab(label: String, selected: Boolean, onClick: () -> Unit) {
         fontSize = 10.sp,
         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
         modifier = Modifier
-            .androidxClickable(onClick = onClick)
+            .clickable(onClick = onClick)
             .background(if (selected) TitanColors.Surface else Color.Transparent)
             .padding(horizontal = 7.dp, vertical = 3.dp),
     )
@@ -520,7 +520,7 @@ private fun QuickActionButton(
     Row(
         modifier = Modifier
             .background(TitanColors.Surface.copy(alpha = 0.95f), androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
-            .androidxClickable(onClick = onClick)
+            .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -574,7 +574,7 @@ private fun SnackMessage(text: String, onDismiss: () -> Unit) {
         Row(
             modifier = Modifier
                 .background(TitanColors.SurfaceHigh, androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
-                .androidxClickable(onClick = onDismiss)
+                .clickable(onClick = onDismiss)
                 .padding(horizontal = 12.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -582,7 +582,3 @@ private fun SnackMessage(text: String, onDismiss: () -> Unit) {
         }
     }
 }
-
-/** Local alias so the dense chrome can use clickable without importing it everywhere. */
-internal fun Modifier.androidxClickable(onClick: () -> Unit): Modifier =
-    this.then(clickable(onClick = onClick))

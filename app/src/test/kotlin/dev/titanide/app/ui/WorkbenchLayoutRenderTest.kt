@@ -29,11 +29,14 @@ class WorkbenchLayoutRenderTest {
 
     private fun renderAt(qualifiers: String) {
         val container = TitanContainer(ApplicationProvider.getApplicationContext())
+        // Constructed outside the composition so lint's ViewModelConstructorInComposable
+        // rule stays clean, and so the same instance survives recomposition.
+        val viewModel = WorkbenchViewModel(container)
         compose.setContent {
             CompositionLocalProvider(LocalContainer provides container) {
                 TitanTheme {
                     WorkbenchScreen(
-                        viewModel = WorkbenchViewModel(container),
+                        viewModel = viewModel,
                         onOpenSettings = {},
                         onOpenProjects = {},
                     )

@@ -69,7 +69,7 @@ fun SourceControlSidebar(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(WorkbenchMetrics.RowHeight)
-                            .androidxClickableWorkbench { onOpenFile(path) }
+                            .clickable { onOpenFile(path) }
                             .padding(horizontal = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -225,7 +225,7 @@ private fun SidebarAction(
         modifier = Modifier
             .fillMaxWidth()
             .height(28.dp)
-            .androidxClickableWorkbench(onClick)
+            .clickable(onClick = onClick)
             .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Start,
@@ -235,7 +235,3 @@ private fun SidebarAction(
         Text(text = label, color = TitanColors.TextPrimary.copy(alpha = 0.9f), fontSize = 11.sp)
     }
 }
-
-/** Shared dense clickable so sidebar rows stay consistent. */
-internal fun Modifier.androidxClickableWorkbench(onClick: () -> Unit): Modifier =
-    this.then(clickable(onClick = onClick))
