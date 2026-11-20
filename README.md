@@ -96,7 +96,7 @@ whole process group on cancel.
 export JAVA_HOME=/path/to/jdk-17+
 export ANDROID_HOME=/path/to/android-sdk
 ./gradlew :app:assembleDebug        # APK
-./gradlew testDebugUnitTest         # 218 unit tests
+./gradlew testDebugUnitTest         # 249 unit tests
 cd backend/agent && PYTHONPATH=. python3 -m unittest discover -s tests   # 19 tests
 ```
 

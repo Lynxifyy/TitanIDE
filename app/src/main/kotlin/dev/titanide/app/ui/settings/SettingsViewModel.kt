@@ -107,7 +107,16 @@ class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
                     delay(code.pollIntervalSeconds * 1000L)
                     when (val outcome = runCatching { container.deviceFlow.pollOnce(code.deviceCode) }.getOrNull()) {
                         is DeviceFlowAuth.PollOutcome.Authorized -> {
-                            container.credentials.put(CredentialKey.GITHUB_TOKEN, outcome.token)
+                            val stored = container.credentials.put(CredentialKey.GITHUB_TOKEN, outcome.token)
+                            if (!stored) {
+                                _state.value = _state.value.copy(
+                                    deviceFlow = DeviceFlowUi(
+                                        error = "Signed in, but the token could not be saved to the Keystore. " +
+                                            "The session will not survive a restart.",
+                                    ),
+                                )
+                                return@launch
+                            }
                             container.setGitHubToken(outcome.token)
                             _state.value = _state.value.copy(
                                 deviceFlow = null,
@@ -165,11 +174,15 @@ class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
     fun saveAiKey(key: String) {
         if (key.isBlank()) return
         viewModelScope.launch {
-            container.credentials.put(CredentialKey.AI_API_KEY, key)
+            val stored = container.credentials.put(CredentialKey.AI_API_KEY, key)
             container.refreshCredentials()
             _state.value = _state.value.copy(
-                aiKeyStored = true,
-                message = "API key stored in the Android Keystore",
+                aiKeyStored = stored,
+                message = if (stored) {
+                    "API key stored in the Android Keystore"
+                } else {
+                    "The Keystore refused the key, so it was not saved"
+                },
             )
         }
     }
@@ -185,9 +198,12 @@ class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
     fun saveRemoteToken(token: String) {
         if (token.isBlank()) return
         viewModelScope.launch {
-            container.credentials.put(CredentialKey.REMOTE_AGENT_TOKEN, token)
+            val stored = container.credentials.put(CredentialKey.REMOTE_AGENT_TOKEN, token)
             container.refreshCredentials()
-            _state.value = _state.value.copy(remoteTokenStored = true, message = "Remote agent token stored")
+            _state.value = _state.value.copy(
+                remoteTokenStored = stored,
+                message = if (stored) "Remote agent token stored" else "The Keystore refused the token, so it was not saved",
+            )
         }
     }
 

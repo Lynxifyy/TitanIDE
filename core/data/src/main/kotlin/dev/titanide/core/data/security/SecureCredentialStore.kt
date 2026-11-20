@@ -27,8 +27,15 @@ class SecureCredentialStore(private val context: Context) {
         )
     }
 
-    suspend fun put(key: CredentialKey, value: String) = withContext(Dispatchers.IO) {
-        prefs.edit().putString(key.storageKey, value).apply()
+    /**
+     * Stores [value]. Returns false when the keystore is unavailable, for example after a
+     * device restore leaves the master key undecryptable. Callers must surface that instead
+     * of reporting a token as saved.
+     */
+    suspend fun put(key: CredentialKey, value: String): Boolean = withContext(Dispatchers.IO) {
+        runCatching { prefs.edit().putString(key.storageKey, value).commit() }
+            .onFailure { Log.w(TAG, "Credential write failed for ${key.storageKey}", it) }
+            .getOrDefault(false)
     }
 
     suspend fun get(key: CredentialKey): String? = withContext(Dispatchers.IO) {
@@ -39,12 +46,16 @@ class SecureCredentialStore(private val context: Context) {
 
     suspend fun contains(key: CredentialKey): Boolean = !get(key).isNullOrBlank()
 
-    suspend fun remove(key: CredentialKey) = withContext(Dispatchers.IO) {
-        prefs.edit().remove(key.storageKey).apply()
+    suspend fun remove(key: CredentialKey): Boolean = withContext(Dispatchers.IO) {
+        runCatching { prefs.edit().remove(key.storageKey).commit() }
+            .onFailure { Log.w(TAG, "Credential removal failed for ${key.storageKey}", it) }
+            .getOrDefault(false)
     }
 
-    suspend fun clearAll() = withContext(Dispatchers.IO) {
-        prefs.edit().clear().apply()
+    suspend fun clearAll(): Boolean = withContext(Dispatchers.IO) {
+        runCatching { prefs.edit().clear().commit() }
+            .onFailure { Log.w(TAG, "Credential clear failed", it) }
+            .getOrDefault(false)
     }
 
     companion object {
