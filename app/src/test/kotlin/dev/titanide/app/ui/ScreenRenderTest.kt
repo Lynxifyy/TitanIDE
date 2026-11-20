@@ -26,6 +26,8 @@ import dev.titanide.app.ui.tools.DatabaseViewerScreen
 import dev.titanide.app.ui.tools.DocsScreen
 import dev.titanide.app.ui.tools.ToolsScreen
 import dev.titanide.app.ui.tools.UiPreviewScreen
+import dev.titanide.app.ui.workbench.WorkbenchScreen
+import dev.titanide.app.ui.workbench.WorkbenchViewModel
 import dev.titanide.core.designsystem.TitanTheme
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -47,8 +49,10 @@ class ScreenRenderTest {
     @get:Rule
     val compose = createComposeRule()
 
-    private fun render(screen: @Composable () -> Unit) {
-        val container = TitanContainer(ApplicationProvider.getApplicationContext())
+    private fun render(screen: @Composable () -> Unit) =
+        renderWith(TitanContainer(ApplicationProvider.getApplicationContext()), screen)
+
+    private fun renderWith(container: TitanContainer, screen: @Composable () -> Unit) {
         compose.setContent {
             CompositionLocalProvider(LocalContainer provides container) {
                 TitanTheme { screen() }
@@ -85,6 +89,15 @@ class ScreenRenderTest {
     @Test
     fun editorRenders() = render {
         EditorScreen(onOpenProjects = {}, onBuild = {}, onGit = {})
+    }
+
+    @Test
+    fun workbenchRenders() {
+        val container = TitanContainer(ApplicationProvider.getApplicationContext())
+        val viewModel = WorkbenchViewModel(container)
+        renderWith(container) {
+            WorkbenchScreen(viewModel = viewModel, onOpenSettings = {}, onOpenProjects = {})
+        }
     }
 
     @Test

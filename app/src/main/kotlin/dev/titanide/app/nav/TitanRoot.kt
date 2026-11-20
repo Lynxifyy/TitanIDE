@@ -31,7 +31,6 @@ import androidx.navigation.navArgument
 import dev.titanide.app.ui.ai.AiStudioScreen
 import dev.titanide.app.ui.build.BuildScreen
 import dev.titanide.app.ui.create.CreateProjectScreen
-import dev.titanide.app.ui.editor.EditorScreen
 import dev.titanide.app.ui.extensions.ExtensionsScreen
 import dev.titanide.app.ui.github.GitHubScreen
 import dev.titanide.app.ui.github.GitHubRepositoryScreen
@@ -47,6 +46,10 @@ import dev.titanide.app.ui.tools.DatabaseViewerScreen
 import dev.titanide.app.ui.tools.DocsScreen
 import dev.titanide.app.ui.tools.ToolsScreen
 import dev.titanide.app.ui.tools.UiPreviewScreen
+import dev.titanide.app.ui.workbench.WorkbenchScreen
+import dev.titanide.app.ui.workbench.WorkbenchViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.titanide.app.LocalContainer
 import dev.titanide.core.designsystem.TitanColors
 
 /**
@@ -58,7 +61,9 @@ fun TitanRoot() {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
-    val showChrome = TitanDestination.entries.any { it.route == currentRoute }
+    val destination = TitanDestination.entries.firstOrNull { it.route == currentRoute }
+    // The IDE workbench is full bleed: no bottom bar or rail, so the editor gets the space.
+    val showChrome = destination != null && !destination.isFullBleed
 
     AdaptiveShell(
         navController = navController,
@@ -194,10 +199,13 @@ private fun NavGraphBuilder.primaryDestinations(navController: NavHostController
         )
     }
     composable(TitanDestination.EDITOR.route) {
-        EditorScreen(
+        val container = LocalContainer.current
+        val workbench: WorkbenchViewModel = viewModel { WorkbenchViewModel(container) }
+        WorkbenchScreen(
+            viewModel = workbench,
+            onOpenSettings = { navController.navigate(TitanDestination.SETTINGS.route) },
             onOpenProjects = { navController.navigate(TitanDestination.PROJECTS.route) },
-            onBuild = { navController.navigate(TitanRoutes.build(it)) },
-            onGit = { navController.navigate(TitanRoutes.git(it)) },
+            onExitWorkbench = { navController.navigate(TitanDestination.HOME.route) },
         )
     }
     composable(TitanDestination.AI.route) {

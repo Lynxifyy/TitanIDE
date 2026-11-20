@@ -122,6 +122,8 @@ dependencies {
     implementation(project(":core:engine"))
     implementation(project(":core:git"))
     implementation(project(":core:ai"))
+    implementation(project(":core:opencode"))
+    implementation(project(":core:workbench"))
     implementation(project(":core:templates"))
 
     implementation(libs.androidx.core.ktx)

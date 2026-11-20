@@ -356,6 +356,85 @@ fun SettingsScreen() {
                 }
             }
 
+            // --- OpenCode agent ---------------------------------------------
+            Text("OpenCode agent", style = MaterialTheme.typography.titleSmall, color = TitanColors.TextPrimary)
+            TitanCard {
+                Column(Modifier.padding(14.dp)) {
+                    Text(
+                        "TITAN drives a real OpenCode server over its HTTP and SSE API. The " +
+                            "server runs the agent and edits files in the project directory below.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TitanColors.TextMuted,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = settings?.openCode?.serverUrl.orEmpty(),
+                        onValueChange = viewModel::setOpenCodeUrl,
+                        label = { Text("Server URL") },
+                        placeholder = { Text("http://192.168.1.20:4096") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = settings?.openCode?.remoteProjectDir.orEmpty(),
+                        onValueChange = viewModel::setOpenCodeDir,
+                        label = { Text("Project directory on the server") },
+                        placeholder = { Text("/home/me/projects/my-app") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Connect on launch", style = MaterialTheme.typography.bodySmall, color = TitanColors.TextPrimary)
+                            Text(
+                                "Reconnects to the server whenever a project opens.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TitanColors.TextMuted,
+                            )
+                        }
+                        Switch(
+                            checked = settings?.openCode?.autoConnect ?: false,
+                            onCheckedChange = viewModel::setOpenCodeAutoConnect,
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    if (state.openCodeTokenStored) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "Bearer token stored in the Keystore",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TitanColors.Success,
+                                modifier = Modifier.weight(1f),
+                            )
+                            OutlinedButton(onClick = viewModel::clearOpenCodeToken) { Text("Remove") }
+                        }
+                    } else {
+                        var openCodeToken by remember { mutableStateOf("") }
+                        OutlinedTextField(
+                            value = openCodeToken,
+                            onValueChange = { openCodeToken = it },
+                            label = { Text("Bearer token") },
+                            placeholder = { Text("Only needed if the server sets one") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodySmall,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Button(
+                            onClick = {
+                                viewModel.saveOpenCodeToken(openCodeToken)
+                                openCodeToken = ""
+                            },
+                            enabled = openCodeToken.isNotBlank(),
+                        ) { Text("Store token") }
+                    }
+                }
+            }
+
             // --- Editor -----------------------------------------------------
             Text("Editor", style = MaterialTheme.typography.titleSmall, color = TitanColors.TextPrimary)
             TitanCard {

@@ -39,6 +39,17 @@ data class AiSettings(
     val hasApiKey: Boolean = false,
 )
 
+/**
+ * Connection to an OpenCode agent server. [remoteProjectDir] is the path of the project on
+ * the machine running the server; it cannot be inferred from the Android sandbox path, so
+ * the user states it once and the agent panel shows it back to them.
+ */
+data class OpenCodeSettings(
+    val serverUrl: String = "",
+    val remoteProjectDir: String = "",
+    val autoConnect: Boolean = false,
+)
+
 data class BuildSettings(
     val defaultTargetId: String = "local",
     val remoteAgentUrl: String = "",
@@ -59,6 +70,7 @@ data class TitanSettings(
     val ai: AiSettings = AiSettings(),
     val build: BuildSettings = BuildSettings(),
     val terminal: TerminalSettings = TerminalSettings(),
+    val openCode: OpenCodeSettings = OpenCodeSettings(),
     val onboarded: Boolean = false,
     val themeId: String = "titan-dark",
 )
@@ -91,6 +103,10 @@ class SettingsRepository(private val context: Context) {
         val ghRepo = stringPreferencesKey("build_gh_repo")
         val ghWorkflow = stringPreferencesKey("build_gh_workflow")
         val keepLogs = intPreferencesKey("build_keep_logs")
+
+        val ocUrl = stringPreferencesKey("opencode_url")
+        val ocDir = stringPreferencesKey("opencode_remote_dir")
+        val ocAutoConnect = booleanPreferencesKey("opencode_auto_connect")
 
         val termFontSize = intPreferencesKey("terminal_font_size")
         val termShell = stringPreferencesKey("terminal_shell")
@@ -135,6 +151,11 @@ class SettingsRepository(private val context: Context) {
                 shellPath = prefs[Keys.termShell].orEmpty(),
                 maxSessions = prefs[Keys.termMaxSessions] ?: 4,
             ),
+            openCode = OpenCodeSettings(
+                serverUrl = prefs[Keys.ocUrl].orEmpty(),
+                remoteProjectDir = prefs[Keys.ocDir].orEmpty(),
+                autoConnect = prefs[Keys.ocAutoConnect] ?: false,
+            ),
             onboarded = prefs[Keys.onboarded] ?: false,
             themeId = prefs[Keys.theme] ?: "titan-dark",
         )
@@ -178,6 +199,15 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.ghRepo] = next.githubRepo
             prefs[Keys.ghWorkflow] = next.githubWorkflow
             prefs[Keys.keepLogs] = next.keepLogsDays
+        }
+    }
+
+    suspend fun updateOpenCode(block: (OpenCodeSettings) -> OpenCodeSettings) {
+        val next = block(settingsSnapshot().openCode)
+        context.dataStore.edit { prefs ->
+            prefs[Keys.ocUrl] = next.serverUrl.trim()
+            prefs[Keys.ocDir] = next.remoteProjectDir.trim()
+            prefs[Keys.ocAutoConnect] = next.autoConnect
         }
     }
 

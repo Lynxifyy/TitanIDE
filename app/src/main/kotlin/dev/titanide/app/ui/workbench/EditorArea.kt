@@ -1,0 +1,391 @@
+package dev.titanide.app.ui.workbench
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import dev.titanide.core.designsystem.TitanColors
+import dev.titanide.core.model.Diagnostic
+import dev.titanide.core.model.Severity
+import dev.titanide.core.workbench.EditorGroup
+import dev.titanide.core.workbench.EditorTab
+import dev.titanide.core.workbench.breadcrumbFor
+
+/**
+ * The editor area: tab strip, breadcrumb, gutter and the code surface.
+ *
+ * The code surface is a real editable text field with token colouring applied through a
+ * visual transformation, so typing, selection and the soft keyboard all behave natively
+ * while the highlighting stays in sync.
+ */
+@Composable
+fun EditorArea(
+    group: EditorGroup,
+    buffer: BufferState?,
+    diagnostics: List<Diagnostic>,
+    rootName: String?,
+    onSelectTab: (String) -> Unit,
+    onCloseTab: (String) -> Unit,
+    onChange: (String, Int) -> Unit,
+    onSave: () -> Unit,
+    onToggleComment: () -> Unit,
+    onFormat: () -> Unit,
+    modifier: Modifier = Modifier,
+    showGutter: Boolean = true,
+) {
+    Column(modifier = modifier.fillMaxSize().background(TitanColors.Canvas)) {
+        if (group.tabs.isNotEmpty()) {
+            TabStrip(
+                tabs = group.tabs,
+                activeId = group.activeTab?.id,
+                onSelect = onSelectTab,
+                onClose = onCloseTab,
+            )
+        }
+        if (buffer != null) {
+            Breadcrumb(path = buffer.path, rootName = rootName)
+            CodeSurface(
+                buffer = buffer,
+                diagnostics = diagnostics,
+                onChange = onChange,
+                modifier = Modifier.weight(1f),
+                showGutter = showGutter,
+            )
+            EditorStatusStrip(
+                buffer = buffer,
+                diagnostics = diagnostics,
+                onSave = onSave,
+                onToggleComment = onToggleComment,
+                onFormat = onFormat,
+            )
+        } else {
+            NoFileOpen()
+        }
+    }
+}
+
+@Composable
+private fun TabStrip(
+    tabs: List<EditorTab>,
+    activeId: String?,
+    onSelect: (String) -> Unit,
+    onClose: (String) -> Unit,
+) {
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(WorkbenchMetrics.TabHeight)
+            .background(TitanColors.CanvasElevated),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        items(tabs, key = { it.id }) { tab ->
+            val active = tab.id == activeId
+            Row(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .background(if (active) TitanColors.Canvas else Color.Transparent)
+                    .clickable { onSelect(tab.id) }
+                    .padding(start = 10.dp, end = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (active) {
+                    Box(
+                        modifier = Modifier
+                            .width(2.dp)
+                            .height(WorkbenchMetrics.TabHeight)
+                            .background(TitanColors.Primary),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(
+                    text = tab.title,
+                    color = if (active) TitanColors.TextPrimary else TitanColors.TextMuted,
+                    fontSize = 11.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.width(132.dp),
+                )
+                if (tab.dirty) {
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 4.dp)
+                            .size(6.dp)
+                            .background(TitanColors.Primary, androidx.compose.foundation.shape.CircleShape),
+                    )
+                } else {
+                    DenseIconButton(
+                        icon = Icons.Filled.Close,
+                        contentDescription = "Close ${tab.title}",
+                        onClick = { onClose(tab.id) },
+                    )
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .height(16.dp)
+                    .background(TitanColors.OutlineFaint),
+            )
+        }
+    }
+}
+
+@Composable
+private fun Breadcrumb(path: String, rootName: String?) {
+    val segments = remember(path, rootName) { breadcrumbFor(path, rootName) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(WorkbenchMetrics.SectionHeaderHeight)
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        segments.forEachIndexed { index, segment ->
+            if (index > 0) {
+                Text(
+                    text = "›",
+                    color = TitanColors.TextMuted.copy(alpha = 0.6f),
+                    fontSize = 10.sp,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+            }
+            Text(
+                text = segment,
+                color = if (index == segments.lastIndex) TitanColors.TextPrimary else TitanColors.TextMuted,
+                fontSize = 10.5.sp,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CodeSurface(
+    buffer: BufferState,
+    diagnostics: List<Diagnostic>,
+    onChange: (String, Int) -> Unit,
+    modifier: Modifier = Modifier,
+    showGutter: Boolean = true,
+) {
+    val fontSize = 12
+    val lineHeight = 18
+    val annotated = remember(buffer.content, buffer.language) {
+        SyntaxHighlighting.highlight(buffer.content, buffer.language)
+    }
+    val errorLines = remember(diagnostics) {
+        diagnostics.filter { it.severity == Severity.ERROR }.mapNotNull { it.line }.toSet()
+    }
+    val warningLines = remember(diagnostics) {
+        diagnostics.filter { it.severity == Severity.WARNING }.mapNotNull { it.line }.toSet()
+    }
+    val lineCount = buffer.lineCount
+    val vertical = rememberScrollState()
+    val horizontal = rememberScrollState()
+
+    // The field owns the selection; the buffer only knows the caret offset. Syncing the
+    // other way (buffer -> field) is needed for undo, format and comment toggles.
+    var fieldValue by remember(buffer.path) {
+        mutableStateOf(TextFieldValue(buffer.content, TextRange(buffer.caret.coerceIn(0, buffer.content.length))))
+    }
+    LaunchedEffect(buffer.content) {
+        if (fieldValue.text != buffer.content) {
+            fieldValue = TextFieldValue(
+                text = buffer.content,
+                selection = TextRange(buffer.caret.coerceIn(0, buffer.content.length)),
+            )
+        }
+    }
+
+    Row(modifier = modifier.fillMaxSize()) {
+        if (showGutter) {
+            Column(
+                modifier = Modifier
+                    .width(40.dp)
+                    .fillMaxHeight()
+                    .verticalScroll(vertical)
+                    .padding(top = 6.dp),
+                horizontalAlignment = Alignment.End,
+            ) {
+                repeat(lineCount) { index ->
+                    val line = index + 1
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(lineHeight.dp)
+                            .padding(end = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        if (line in errorLines) {
+                            Icon(
+                                Icons.Filled.ErrorOutline,
+                                contentDescription = "Error on line $line",
+                                tint = TitanColors.Error,
+                                modifier = Modifier.size(8.dp),
+                            )
+                            Spacer(Modifier.width(2.dp))
+                        } else if (line in warningLines) {
+                            Icon(
+                                Icons.Filled.WarningAmber,
+                                contentDescription = "Warning on line $line",
+                                tint = TitanColors.Warning,
+                                modifier = Modifier.size(8.dp),
+                            )
+                            Spacer(Modifier.width(2.dp))
+                        }
+                        Text(
+                            text = line.toString(),
+                            color = if (line in errorLines) TitanColors.Error else TitanColors.TextMuted.copy(alpha = 0.55f),
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .fillMaxHeight()
+                    .background(TitanColors.OutlineFaint),
+            )
+        }
+
+        BasicTextField(
+            value = fieldValue,
+            onValueChange = { value ->
+                fieldValue = value
+                onChange(value.text, value.selection.start)
+            },
+            textStyle = TextStyle(
+                color = TitanColors.TextPrimary,
+                fontSize = fontSize.sp,
+                lineHeight = lineHeight.sp,
+                fontFamily = FontFamily.Monospace,
+            ),
+            cursorBrush = SolidColor(TitanColors.Primary),
+            visualTransformation = SyntaxHighlightTransformation(buffer.language),
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .verticalScroll(vertical)
+                .horizontalScroll(horizontal)
+                .padding(start = 8.dp, top = 6.dp, end = 8.dp, bottom = 8.dp),
+        )
+    }
+}
+
+@Composable
+private fun EditorStatusStrip(
+    buffer: BufferState,
+    diagnostics: List<Diagnostic>,
+    onSave: () -> Unit,
+    onToggleComment: () -> Unit,
+    onFormat: () -> Unit,
+) {
+    val errors = diagnostics.count { it.severity == Severity.ERROR }
+    val warnings = diagnostics.count { it.severity == Severity.WARNING }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(28.dp)
+            .background(TitanColors.CanvasElevated)
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (errors > 0) StatusChip("$errors error${if (errors == 1) "" else "s"}", TitanColors.Error)
+        if (warnings > 0) StatusChip("$warnings warning${if (warnings == 1) "" else "s"}", TitanColors.Warning)
+        if (errors == 0 && warnings == 0) {
+            StatusChip("No problems", TitanColors.Success)
+        }
+        Spacer(Modifier.weight(1f))
+        ActionChip("Comment", onToggleComment)
+        ActionChip("Format", onFormat)
+        ActionChip(if (buffer.dirty) "Save *" else "Saved", onSave)
+    }
+}
+
+@Composable
+private fun ActionChip(label: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    ) {
+        Text(
+            text = label,
+            color = TitanColors.TextMuted,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Medium,
+        )
+    }
+}
+
+@Composable
+private fun NoFileOpen() {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = "TITAN IDE",
+                color = TitanColors.TextMuted.copy(alpha = 0.35f),
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 3.sp,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "Open a file from the explorer to start editing",
+                color = TitanColors.TextMuted.copy(alpha = 0.7f),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer(Modifier.height(14.dp))
+            Text(
+                text = "Ctrl+S saves  ·  Ctrl+/ comments  ·  Ctrl+Z undoes",
+                color = TitanColors.TextMuted.copy(alpha = 0.5f),
+                fontSize = 10.sp,
+            )
+        }
+    }
+}

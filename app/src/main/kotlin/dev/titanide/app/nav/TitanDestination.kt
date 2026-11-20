@@ -26,10 +26,12 @@ enum class TitanDestination(
     val filled: ImageVector,
     val outlined: ImageVector,
     val isPrimary: Boolean = true,
+    /** Full-bleed destinations draw no app chrome; the IDE needs every pixel. */
+    val isFullBleed: Boolean = false,
 ) {
     HOME("home", "Home", Icons.Filled.Home, Icons.Outlined.Home),
     PROJECTS("projects", "Projects", Icons.Filled.Folder, Icons.Outlined.Folder),
-    EDITOR("editor", "Editor", Icons.Filled.Code, Icons.Outlined.Code),
+    EDITOR("editor", "Editor", Icons.Filled.Code, Icons.Outlined.Code, isFullBleed = true),
     AI("ai", "AI Studio", Icons.Filled.Psychology, Icons.Outlined.Psychology),
     TERMINAL("terminal", "Terminal", Icons.Filled.Terminal, Icons.Outlined.Terminal),
     EXTENSIONS("extensions", "Extensions", Icons.Filled.Extension, Icons.Outlined.Extension),
