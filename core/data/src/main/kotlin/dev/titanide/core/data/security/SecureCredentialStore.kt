@@ -95,5 +95,6 @@ enum class CredentialKey(val storageKey: String) {
     GITHUB_REFRESH("github_refresh_token"),
     AI_API_KEY("ai_api_key"),
     REMOTE_AGENT_TOKEN("remote_agent_token"),
+    OPENCODE_TOKEN("opencode_bearer_token"),
     ;
 }

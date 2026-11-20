@@ -31,6 +31,7 @@ import dev.titanide.core.git.api.GitHubApiClient
 import dev.titanide.core.git.auth.DeviceFlowAuth
 import dev.titanide.core.git.local.GitRepositoryService
 import dev.titanide.core.model.ExecutionTarget
+import dev.titanide.core.opencode.session.OpenCodeSession
 import dev.titanide.core.templates.GeneratorRegistry
 import dev.titanide.core.templates.ProjectScaffolder
 import kotlinx.coroutines.CoroutineScope
@@ -108,6 +109,14 @@ class TitanContainer(private val context: Context) {
         )
     }
 
+    /**
+     * The OpenCode agent conversation for the current project. One per app process: the
+     * panel is the only consumer, and reconnecting is an explicit user action.
+     */
+    val openCodeSession: OpenCodeSession by lazy {
+        OpenCodeSession(scope = appScope)
+    }
+
     /** Shared "file the user is looking at", written by the editor and read by AI modes. */
     val activeFile: ActiveFileSession = ActiveFileSession()
 
@@ -176,6 +185,27 @@ class TitanContainer(private val context: Context) {
         gitHubToken.value = credentials.get(CredentialKey.GITHUB_TOKEN)
         remoteAgentToken = credentials.get(CredentialKey.REMOTE_AGENT_TOKEN)
         refreshAiProvider()
+    }
+
+    /**
+     * Connects the agent to the configured OpenCode server for [project]. The remote
+     * directory falls back to the project name so a first run has a sensible default
+     * instead of an empty string the server would reject.
+     */
+    fun connectAgent(project: dev.titanide.core.model.Project?) {
+        val openCode = settingsState.value?.openCode ?: return
+        if (openCode.serverUrl.isBlank()) return
+        val directory = openCode.remoteProjectDir.ifBlank {
+            project?.rootPath?.substringAfterLast('/') ?: project?.name.orEmpty()
+        }
+        appScope.launch {
+            val token = credentials.get(CredentialKey.OPENCODE_TOKEN)
+            openCodeSession.connect(
+                url = openCode.serverUrl,
+                token = token,
+                directory = directory,
+            )
+        }
     }
 
     fun isGitHubSignedIn(): Boolean = !gitHubToken.value.isNullOrBlank()

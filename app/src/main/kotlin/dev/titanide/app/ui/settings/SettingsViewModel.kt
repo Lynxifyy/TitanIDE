@@ -30,6 +30,7 @@ data class SettingsUiState(
     val deviceFlow: DeviceFlowUi? = null,
     val aiKeyStored: Boolean = false,
     val remoteTokenStored: Boolean = false,
+    val openCodeTokenStored: Boolean = false,
     val message: String? = null,
     val storageUsed: Long = 0,
 )
@@ -48,6 +49,7 @@ class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
                     settings = snapshot,
                     aiKeyStored = container.credentials.contains(CredentialKey.AI_API_KEY),
                     remoteTokenStored = container.credentials.contains(CredentialKey.REMOTE_AGENT_TOKEN),
+                    openCodeTokenStored = container.credentials.contains(CredentialKey.OPENCODE_TOKEN),
                 )
             }
         }
@@ -258,6 +260,36 @@ class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
 
     fun setGitHubWorkflow(workflow: String) {
         viewModelScope.launch { container.settings.updateBuild { it.copy(githubWorkflow = workflow.trim()) } }
+    }
+
+    fun setOpenCodeUrl(url: String) {
+        viewModelScope.launch { container.settings.updateOpenCode { it.copy(serverUrl = url) } }
+    }
+
+    fun setOpenCodeDir(dir: String) {
+        viewModelScope.launch { container.settings.updateOpenCode { it.copy(remoteProjectDir = dir) } }
+    }
+
+    fun setOpenCodeAutoConnect(enabled: Boolean) {
+        viewModelScope.launch { container.settings.updateOpenCode { it.copy(autoConnect = enabled) } }
+    }
+
+    fun saveOpenCodeToken(token: String) {
+        if (token.isBlank()) return
+        viewModelScope.launch {
+            val stored = container.credentials.put(CredentialKey.OPENCODE_TOKEN, token)
+            _state.value = _state.value.copy(
+                openCodeTokenStored = stored,
+                message = if (stored) "OpenCode token stored" else "The Keystore refused the token, so it was not saved",
+            )
+        }
+    }
+
+    fun clearOpenCodeToken() {
+        viewModelScope.launch {
+            container.credentials.remove(CredentialKey.OPENCODE_TOKEN)
+            _state.value = _state.value.copy(openCodeTokenStored = false, message = "OpenCode token removed")
+        }
     }
 
     fun setEditorFontSize(size: Int) {

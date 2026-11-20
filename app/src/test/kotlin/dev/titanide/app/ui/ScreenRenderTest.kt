@@ -26,6 +26,8 @@ import dev.titanide.app.ui.tools.DatabaseViewerScreen
 import dev.titanide.app.ui.tools.DocsScreen
 import dev.titanide.app.ui.tools.ToolsScreen
 import dev.titanide.app.ui.tools.UiPreviewScreen
+import dev.titanide.app.ui.workbench.WorkbenchScreen
+import dev.titanide.app.ui.workbench.WorkbenchViewModel
 import dev.titanide.core.designsystem.TitanTheme
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -85,6 +87,16 @@ class ScreenRenderTest {
     @Test
     fun editorRenders() = render {
         EditorScreen(onOpenProjects = {}, onBuild = {}, onGit = {})
+    }
+
+    @Test
+    fun workbenchRenders() = render {
+        val container = LocalContainer.current
+        WorkbenchScreen(
+            viewModel = WorkbenchViewModel(container),
+            onOpenSettings = {},
+            onOpenProjects = {},
+        )
     }
 
     @Test
