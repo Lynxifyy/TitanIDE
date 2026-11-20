@@ -91,6 +91,9 @@ interface ProjectDao {
     @Query("SELECT * FROM projects ORDER BY lastOpenedAt DESC")
     fun observeAll(): Flow<List<ProjectEntity>>
 
+    @Query("SELECT * FROM projects ORDER BY lastOpenedAt DESC")
+    suspend fun all(): List<ProjectEntity>
+
     @Query("SELECT * FROM projects WHERE id = :id")
     fun observeById(id: String): Flow<ProjectEntity?>
 
@@ -130,6 +133,9 @@ interface BuildDao {
     @Query("SELECT * FROM build_history WHERE projectId = :projectId ORDER BY startedAt DESC")
     fun observeForProject(projectId: String): Flow<List<BuildRecordEntity>>
 
+    @Query("SELECT * FROM build_history ORDER BY startedAt DESC LIMIT :limit")
+    suspend fun all(limit: Int = 100): List<BuildRecordEntity>
+
     @Query("SELECT * FROM build_history WHERE id = :id")
     suspend fun findById(id: String): BuildRecordEntity?
 
@@ -165,12 +171,18 @@ interface TabDao {
 
     @Query("DELETE FROM open_tabs WHERE projectId = :projectId")
     suspend fun clearProject(projectId: String)
+
+    @Query("SELECT COUNT(*) FROM open_tabs")
+    suspend fun count(): Int
 }
 
 @Dao
 interface ExtensionDao {
     @Query("SELECT * FROM extensions ORDER BY name ASC")
     fun observeAll(): Flow<List<ExtensionEntity>>
+
+    @Query("SELECT COUNT(*) FROM extensions")
+    suspend fun count(): Int
 
     @Query("SELECT * FROM extensions WHERE id = :id")
     suspend fun findById(id: String): ExtensionEntity?
@@ -189,6 +201,9 @@ interface ExtensionDao {
 interface HttpRequestDao {
     @Query("SELECT * FROM http_requests ORDER BY updatedAt DESC")
     fun observeAll(): Flow<List<HttpRequestEntity>>
+
+    @Query("SELECT COUNT(*) FROM http_requests")
+    suspend fun count(): Int
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(request: HttpRequestEntity)

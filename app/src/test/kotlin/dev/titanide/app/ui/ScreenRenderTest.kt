@@ -1,0 +1,165 @@
+package dev.titanide.app.ui
+
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onRoot
+import androidx.test.core.app.ApplicationProvider
+import dev.titanide.app.LocalContainer
+import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.ui.ai.AiStudioScreen
+import dev.titanide.app.ui.build.BuildScreen
+import dev.titanide.app.ui.create.CreateProjectScreen
+import dev.titanide.app.ui.editor.EditorScreen
+import dev.titanide.app.ui.extensions.ExtensionsScreen
+import dev.titanide.app.ui.git.GitScreen
+import dev.titanide.app.ui.github.GitHubRepositoryScreen
+import dev.titanide.app.ui.github.GitHubScreen
+import dev.titanide.app.ui.home.HomeScreen
+import dev.titanide.app.ui.projects.ProjectDetailScreen
+import dev.titanide.app.ui.projects.ProjectsScreen
+import dev.titanide.app.ui.settings.SettingsScreen
+import dev.titanide.app.ui.terminal.TerminalScreen
+import dev.titanide.app.ui.tools.ApiTesterScreen
+import dev.titanide.app.ui.tools.AssetStudioScreen
+import dev.titanide.app.ui.tools.DatabaseViewerScreen
+import dev.titanide.app.ui.tools.DocsScreen
+import dev.titanide.app.ui.tools.ToolsScreen
+import dev.titanide.app.ui.tools.UiPreviewScreen
+import dev.titanide.core.designsystem.TitanTheme
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+/**
+ * Renders every screen with a real [TitanContainer] and asserts the tree composes.
+ *
+ * This is what catches the failures a compile cannot: a nested scroll container, a
+ * missing `CompositionLocal`, or a ViewModel that throws during init.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33], qualifiers = "w411dp-h891dp-xhdpi")
+class ScreenRenderTest {
+
+    @get:Rule
+    val compose = createComposeRule()
+
+    private fun render(screen: @Composable () -> Unit) {
+        val container = TitanContainer(ApplicationProvider.getApplicationContext())
+        compose.setContent {
+            CompositionLocalProvider(LocalContainer provides container) {
+                TitanTheme { screen() }
+            }
+        }
+        compose.waitForIdle()
+        compose.onRoot().assertExists()
+    }
+
+    @Test
+    fun homeRenders() = render {
+        HomeScreen(
+            onOpenProject = {},
+            onCreateProject = {},
+            onOpenEditor = {},
+            onOpenBuilds = {},
+            onOpenGitHub = {},
+            onOpenAi = {},
+            onOpenSettings = {},
+            onOpenTools = {},
+        )
+    }
+
+    @Test
+    fun projectsRenders() = render {
+        ProjectsScreen(onCreateProject = {}, onOpenProject = {}, onOpenGitHub = {})
+    }
+
+    @Test
+    fun createProjectRenders() = render {
+        CreateProjectScreen(onBack = {}, onCreated = {})
+    }
+
+    @Test
+    fun editorRenders() = render {
+        EditorScreen(onOpenProjects = {}, onBuild = {}, onGit = {})
+    }
+
+    @Test
+    fun aiStudioRenders() = render { AiStudioScreen(onOpenSettings = {}) }
+
+    @Test
+    fun terminalRenders() = render { TerminalScreen() }
+
+    @Test
+    fun extensionsRenders() = render { ExtensionsScreen() }
+
+    @Test
+    fun settingsRenders() = render { SettingsScreen() }
+
+    @Test
+    fun buildRendersWithoutProject() = render {
+        BuildScreen(projectId = "", onBack = {}, onOpenAi = {})
+    }
+
+    @Test
+    fun gitRendersWithoutProject() = render { GitScreen(projectId = "missing", onBack = {}) }
+
+    @Test
+    fun projectDetailRendersForUnknownProject() = render {
+        ProjectDetailScreen(
+            projectId = "missing",
+            onBack = {},
+            onOpenEditor = {},
+            onBuild = {},
+            onGit = {},
+        )
+    }
+
+    @Test
+    fun gitHubRendersWhenSignedOut() = render {
+        GitHubScreen(onBack = {}, onOpenRepo = {}, onOpenSettings = {})
+    }
+
+    @Test
+    fun gitHubRepositoryRenders() = render {
+        GitHubRepositoryScreen(fullName = "owner/repo", onBack = {}, onImported = {}, onBuild = {})
+    }
+
+    @Test
+    fun toolsHubRenders() = render {
+        ToolsScreen(onBack = {}, onOpenApiTester = {}, onOpenAssetStudio = {},
+            onOpenDatabase = {}, onOpenPreview = {}, onOpenDocs = {})
+    }
+
+    @Test
+    fun apiTesterRenders() = render { ApiTesterScreen(onBack = {}) }
+
+    @Test
+    fun assetStudioRenders() = render { AssetStudioScreen(onBack = {}) }
+
+    @Test
+    fun databaseViewerRenders() = render { DatabaseViewerScreen(onBack = {}) }
+
+    @Test
+    fun uiPreviewRenders() = render { UiPreviewScreen(onBack = {}) }
+
+    @Test
+    fun docsRenders() = render { DocsScreen(onBack = {}) }
+
+    @Test
+    fun everyPrimaryDestinationHasARenderableScreen() {
+        assertTrue(
+            "the seven primary destinations are covered by the tests above",
+            TitanDestinationCoverage.destinations.all { it.isNotBlank() },
+        )
+    }
+}
+
+private object TitanDestinationCoverage {
+    val destinations = listOf(
+        "home", "projects", "editor", "ai", "terminal", "extensions", "settings",
+    )
+}

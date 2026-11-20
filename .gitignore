@@ -13,3 +13,7 @@ captures/
 *.keystore
 !debug.keystore
 .openhands/
+
+# Python
+__pycache__/
+*.pyc

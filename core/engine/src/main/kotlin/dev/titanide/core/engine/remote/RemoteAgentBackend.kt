@@ -30,8 +30,9 @@ import java.util.concurrent.TimeUnit
  *   GET  /v1/jobs/{id}        -> poll state, log and artifacts
  *   POST /v1/jobs/{id}/cancel
  *
- * The client sends commands rather than a tarball so the agent needs no access to the
- * phone's filesystem; both sides speak plain JSON over HTTPS.
+ * The client uploads a zip of the project together with the planned commands, so
+ * the agent never needs filesystem access to the device. Both sides speak plain JSON over
+ * HTTPS. Archives are capped by [MAX_ARCHIVE_BYTES] and the agent must reject unsafe paths.
  */
 @Serializable
 data class AgentJobRequest(
@@ -41,6 +42,8 @@ data class AgentJobRequest(
     @SerialName("kind") val kind: String,
     @SerialName("timeout_seconds") val timeoutSeconds: Int = 1800,
     @SerialName("artifact_globs") val artifactGlobs: List<String> = emptyList(),
+    /** Base64 zip of the project tree, paths relative to the project directory. */
+    @SerialName("source_archive") val sourceArchive: String = "",
 )
 
 @Serializable
@@ -90,12 +93,24 @@ class RemoteAgentBackend(
             val plan = BuildPlanner.plan(request, root, detected)
             if (plan.error != null) return@withContext failure(plan.error)
 
+            onLog("Packing ${root.name} for upload")
+            val archive = runCatching { archiveProject(root) }.getOrElse { error ->
+                return@withContext failure("Could not pack the project: ${error.message}")
+            }
+            if (archive.size > MAX_ARCHIVE_BYTES) {
+                return@withContext failure(
+                    "Project archive is ${archive.size / 1024 / 1024} MB, above the " +
+                        "${MAX_ARCHIVE_BYTES / 1024 / 1024} MB remote build limit",
+                )
+            }
+
             val payload = AgentJobRequest(
                 projectId = request.projectId,
                 buildSystem = detected.buildSystem,
                 commands = plan.commands.map { listOf(it.program) + it.args },
                 kind = request.kind.name,
                 artifactGlobs = plan.artifactGlobs,
+                sourceArchive = java.util.Base64.getEncoder().encodeToString(archive),
             )
 
             val submit = postJson("$baseUrl/v1/jobs", json.encodeToString(AgentJobRequest.serializer(), payload))
@@ -206,11 +221,38 @@ class RemoteAgentBackend(
         executorLabel = "Remote agent",
     )
 
+    /**
+     * Zip of [root], skipping VCS metadata, build output and dependency caches.
+     *
+     * Uses the JDK zip writer rather than a tar library so the engine keeps its existing
+     * dependency set. Entry names are relative and forward-slashed; the agent must still
+     * validate them against path traversal.
+     */
+    private fun archiveProject(root: File): ByteArray {
+        val output = java.io.ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(output).use { zip ->
+            root.walkTopDown()
+                .onEnter { it.name !in SKIP_DIRECTORIES }
+                .filter { it.isFile }
+                .forEach { file ->
+                    val relative = file.relativeTo(root).path.replace(File.separatorChar, '/')
+                    zip.putNextEntry(java.util.zip.ZipEntry(relative))
+                    file.inputStream().use { it.copyTo(zip) }
+                    zip.closeEntry()
+                }
+        }
+        return output.toByteArray()
+    }
+
     private fun String.hostOf(): String = runCatching { java.net.URI(this).host ?: this }.getOrDefault(this)
 
     companion object {
         private const val POLL_INTERVAL_MS = 1500L
         private const val MAX_POLLS = 1200
+        private const val MAX_ARCHIVE_BYTES = 96L * 1024 * 1024
+        private val SKIP_DIRECTORIES = setOf(
+            ".git", ".gradle", "build", "node_modules", ".idea", "target", "dist", ".dart_tool",
+        )
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(20, TimeUnit.SECONDS)
