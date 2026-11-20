@@ -3,7 +3,11 @@
 local.properties
 .idea/
 .DS_Store
-build/
+# Gradle output only. A bare "build/" also matches the Kotlin package
+# dev/titanide/app/ui/build, which silently kept BuildScreen.kt out of git.
+/build/
+**/build/
+!/app/src/main/kotlin/dev/titanide/app/ui/build/
 captures/
 .cxx/
 .externalNativeBuild/
