@@ -16,6 +16,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraphBuilder
@@ -74,8 +76,9 @@ private fun AdaptiveShell(
     showChrome: Boolean,
     content: @Composable () -> Unit,
 ) {
-    val windowWidth = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp
-    val useRail = windowWidth >= 720
+    val density = LocalDensity.current
+    val windowWidth = with(density) { LocalWindowInfo.current.containerSize.width.toDp() }
+    val useRail = windowWidth >= 720.dp
 
     if (!showChrome) {
         Surface(color = TitanColors.Canvas, modifier = Modifier.fillMaxSize()) { content() }

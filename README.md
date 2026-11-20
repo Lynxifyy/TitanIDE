@@ -95,13 +95,48 @@ whole process group on cancel.
 ```bash
 export JAVA_HOME=/path/to/jdk-17+
 export ANDROID_HOME=/path/to/android-sdk
-./gradlew :app:assembleDebug        # APK
-./gradlew testDebugUnitTest         # 249 unit tests
+
+./gradlew testDebugUnitTest          # 249 unit tests
+./gradlew :app:assembleDebug         # debug APK, ~26 MB
+./gradlew :app:assembleRelease       # minified release APK, ~4 MB
+./gradlew :app:lintDebug             # lint; zero errors expected
+
 cd backend/agent && PYTHONPATH=. python3 -m unittest discover -s tests   # 19 tests
 ```
 
 `local.properties` must point at your SDK (`sdk.dir=...`). The GitHub OAuth client id is
 supplied at build time with `-Ptitan.github.clientId=...`; it is never committed.
+
+### Release signing
+
+The release build reads its keystore from the environment or from an untracked
+`gradle.properties`, so no key material is ever committed:
+
+```bash
+export TITAN_SIGNING_STORE_FILE=/secure/path/titan-release.jks
+export TITAN_SIGNING_STORE_PASSWORD=...
+export TITAN_SIGNING_KEY_ALIAS=titan
+export TITAN_SIGNING_KEY_PASSWORD=...
+./gradlew :app:assembleRelease
+```
+
+When those variables are absent the release build falls back to the debug key. That still
+runs R8 and produces an installable APK, so a local or CI build works without secrets, but
+the artifact cannot be published. `build.yml` refuses to publish a GitHub release from a
+debug-signed tag.
+
+## Continuous integration
+
+Two workflows under `.github/workflows`:
+
+| Workflow | Trigger | What it does |
+| --- | --- | --- |
+| `ci.yml` | push to `main`, every PR | repository checks (tracked artifacts, credential-shaped literals), the Python agent suite, then unit tests, lint and a debug APK |
+| `build.yml` | push to `main`, tags, PRs | assembles the **release** APK, asserts R8 actually shrank it, verifies the signature, and on a `v*` tag publishes a GitHub release |
+
+`build.yml` publishes only when the APK is release-signed. Add these repository secrets to
+enable that: `SIGNING_KEYSTORE_BASE64`, `SIGNING_STORE_PASSWORD`, `SIGNING_KEY_ALIAS`,
+`SIGNING_KEY_PASSWORD`.
 
 ## Security posture
 

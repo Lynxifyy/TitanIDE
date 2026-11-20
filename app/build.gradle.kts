@@ -25,11 +25,39 @@ android {
         buildConfigField("String", "GITHUB_CLIENT_ID", "\"${githubClientId.get()}\"")
     }
 
+    // Release signing reads from the environment or an untracked gradle.properties, so no
+    // keystore or password ever lands in the repo. CI falls back to the debug key, which
+    // produces an installable but non-publishable APK rather than failing the build.
+    signingConfigs {
+        create("release") {
+            val storePath = providers.gradleProperty("titan.signing.storeFile")
+                .orElse(providers.environmentVariable("TITAN_SIGNING_STORE_FILE"))
+                .orNull
+            if (storePath != null && file(storePath).exists()) {
+                storeFile = file(storePath)
+                storePassword = providers.gradleProperty("titan.signing.storePassword")
+                    .orElse(providers.environmentVariable("TITAN_SIGNING_STORE_PASSWORD"))
+                    .orNull
+                keyAlias = providers.gradleProperty("titan.signing.keyAlias")
+                    .orElse(providers.environmentVariable("TITAN_SIGNING_KEY_ALIAS"))
+                    .orNull
+                keyPassword = providers.gradleProperty("titan.signing.keyPassword")
+                    .orElse(providers.environmentVariable("TITAN_SIGNING_KEY_PASSWORD"))
+                    .orNull
+            }
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
         }
         release {
+            signingConfig = if (signingConfigs.getByName("release").storeFile != null) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -98,9 +126,6 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.material.icons.extended)
     debugImplementation(libs.compose.ui.tooling)
-
-    implementation(libs.koin.android)
-    implementation(libs.koin.androidx.compose)
 
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
