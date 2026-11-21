@@ -95,10 +95,27 @@ class LocalBuildBackend(
             val stageStart = System.currentTimeMillis()
             val sessionId = request.projectId + "-" + command.stageName
             onSessionStarted(request.projectId, sessionId)
+            val workingDir = command.workingDirUnder(root)
+            if (workingDir == null) {
+                val reason = "'${command.workDir}' is not inside the project, so " +
+                    "${command.display} was not run."
+                allLines += reason
+                onLog(reason)
+                stages += BuildStage(command.stageName, System.currentTimeMillis(), System.currentTimeMillis(), false)
+                return BackendOutcome(
+                    status = BuildStatus.FAILED,
+                    exitCode = null,
+                    logLines = allLines,
+                    artifacts = emptyList(),
+                    stages = stages,
+                    failureReason = reason,
+                    executorLabel = "On device",
+                )
+            }
             val outcome = runner.run(
                 sessionId = sessionId,
                 command = listOf(command.program) + command.args,
-                workingDir = root,
+                workingDir = workingDir,
                 environment = request.environment,
                 timeoutMs = command.timeoutMs,
                 onLine = { line ->
@@ -243,8 +260,23 @@ data class PlannedCommand(
     val program: String,
     val args: List<String>,
     val timeoutMs: Long = 20 * 60 * 1000,
+    /** Directory to run in, relative to the project root. Empty means the root itself. */
+    val workDir: String = "",
 ) {
     val display: String get() = (listOf(program) + args).joinToString(" ")
+
+    /**
+     * Resolves [workDir] against the project root, or null if it escapes it. The value comes
+     * from project files, so it must not be able to point outside the project.
+     */
+    fun workingDirUnder(root: File): File? {
+        if (workDir.isBlank()) return root
+        val candidate = File(root, workDir).canonicalFile
+        val canonicalRoot = root.canonicalFile
+        val inside = candidate.path == canonicalRoot.path ||
+            candidate.path.startsWith(canonicalRoot.path + File.separator)
+        return candidate.takeIf { inside && it.isDirectory }
+    }
 }
 
 data class BuildPlan(
@@ -309,7 +341,35 @@ object BuildPlanner {
                 gradleTasks?.buildTasks?.firstOrNull() ?: primaryTask(system),
             )
             BuildKind.TEST -> listOf(gradleTasks?.testTasks?.firstOrNull() ?: testTask(system))
-            BuildKind.RUN -> listOf(gradleTasks?.runTask ?: runTask(system))
+            BuildKind.RUN -> {
+                if (gradleTasks != null) {
+                    listOfNotNull(gradleTasks.runTask)
+                } else {
+                    val target = RunTargetResolver.resolve(root, system)
+                    if (target == null) {
+                        return BuildPlan(
+                            commands = emptyList(),
+                            artifactGlobs = artifactGlobs(system),
+                            error = "Nothing in this project is runnable: " +
+                                "no start script, entry point or run target was found. " +
+                                "Build it and use the artifact instead.",
+                        )
+                    }
+                    // A resolved target already carries its own program and arguments, so it
+                    // bypasses the per-system task translation below.
+                    return BuildPlan(
+                        commands = listOf(
+                            PlannedCommand(
+                                stageName = target.display,
+                                program = target.program,
+                                args = target.args,
+                                workDir = target.workDir,
+                            ),
+                        ),
+                        artifactGlobs = artifactGlobs(system),
+                    )
+                }
+            }
             BuildKind.STOP -> return BuildPlan(emptyList(), emptyList(), "STOP is handled by cancelling the running build")
         }
 
@@ -390,18 +450,6 @@ object BuildPlanner {
         "dotnet" -> "test"
         "maven" -> "test"
         else -> "test"
-    }
-
-    private fun runTask(system: String): String = when (system) {
-        "gradle" -> "run"
-        "npm" -> "start"
-        "cargo" -> "run"
-        "go" -> "run ."
-        "cmake" -> "run"
-        "make" -> "run"
-        "pip" -> "run"
-        "dotnet" -> "run"
-        else -> "run"
     }
 
     private fun cmakeArgs(root: File, task: String): List<String> = when (task) {
