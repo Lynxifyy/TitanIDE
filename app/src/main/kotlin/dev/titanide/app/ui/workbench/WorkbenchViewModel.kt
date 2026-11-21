@@ -258,10 +258,11 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
             analyze(updated)
         }
 
-        if (container.currentSettings()?.editor?.autoSave ?: true) {
+        val editorSettings = container.currentSettings()?.editor
+        if (editorSettings?.autoSave ?: true) {
             autoSaveJob?.cancel()
             autoSaveJob = viewModelScope.launch {
-                delay(1400)
+                delay((editorSettings?.autoSaveDelayMs ?: 1_200L).coerceIn(300L, 10_000L))
                 save(path, silent = true)
             }
         }

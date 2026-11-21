@@ -62,6 +62,8 @@ data class EditorState(
     val searching: Boolean = false,
     val message: String? = null,
     val autoSave: Boolean = true,
+    /** Debounce for auto-save, in milliseconds, from settings. */
+    val autoSaveDelayMs: Int = 1200,
     /**
      * Editor appearance, mirrored from settings. Held in state rather than read inside the
      * text field so a change recomposes only the editor and not the whole screen.
@@ -109,6 +111,7 @@ class EditorViewModel(private val container: TitanContainer) : ViewModel() {
     private val searchEngine = SearchEngine()
     private val undoStack = UndoStack()
     private var analysisJob: Job? = null
+    private var autoSaveJob: Job? = null
     private var searchJob: Job? = null
 
     init {
@@ -127,6 +130,7 @@ class EditorViewModel(private val container: TitanContainer) : ViewModel() {
                 _state.value = _state.value.copy(
                     diagnostics = if (codeGuardEnabled) _state.value.diagnostics else emptyList(),
                     autoSave = settings.editor.autoSave,
+                    autoSaveDelayMs = settings.editor.autoSaveDelayMs.coerceIn(300L, 10_000L).toInt(),
                     appearance = appearance,
                 )
             }
@@ -259,9 +263,13 @@ class EditorViewModel(private val container: TitanContainer) : ViewModel() {
             analyze(newContent, active.language, active.path)
         }
 
+        // One pending save, restarted on each keystroke. Launching a fresh coroutine per
+        // keystroke queued a save per character, so a fast typist wrote the file dozens of
+        // times and the configured delay was ignored.
+        autoSaveJob?.cancel()
         if (state.autoSave) {
-            viewModelScope.launch {
-                delay(1200)
+            autoSaveJob = viewModelScope.launch {
+                delay(_state.value.autoSaveDelayMs.toLong())
                 saveActive(silent = true)
             }
         }

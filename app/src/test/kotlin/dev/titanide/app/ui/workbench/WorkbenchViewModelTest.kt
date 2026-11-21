@@ -155,6 +155,38 @@ class WorkbenchViewModelTest {
         assertTrue("auto save must persist to disk", onDisk.startsWith(marker))
     }
 
+    /**
+     * The workbench debounced auto-save with its own hardcoded delay, so a user who raised the
+     * delay in settings still had files written at the old pace.
+     */
+    @Test
+    fun `auto save waits the delay configured in settings`() = runBlocking {
+        val id = scaffoldProject("bench-autosave-delay")
+        container.settings.updateEditor { it.copy(autoSave = true, autoSaveDelayMs = 3_000) }
+        val viewModel = WorkbenchViewModel(container)
+        viewModel.awaitProject(id)
+
+        val path = viewModel.firstKotlinFile()
+        viewModel.openFile(path)
+        withTimeout(10_000) { viewModel.buffers.first { it.containsKey(path) } }
+
+        val marker = "// titan-delay\n"
+        val original = viewModel.buffers.value.getValue(path).content
+        viewModel.edit(path, marker + original)
+
+        // The old hardcoded delay was 1400 ms, so by now it had already written the file.
+        Thread.sleep(2_100)
+        assertFalse(
+            "auto save must wait the delay from settings, not a hardcoded one",
+            File(container.storage.projectDir(id), path).readText().startsWith(marker),
+        )
+        withTimeout(15_000) { viewModel.buffers.first { entry -> entry[path]?.dirty == false } }
+        assertTrue(
+            "the edit must still reach disk once the configured delay elapses",
+            File(container.storage.projectDir(id), path).readText().startsWith(marker),
+        )
+    }
+
     @Test
     fun `undo reverts the last edit`() = runBlocking {
         val id = scaffoldProject("bench-undo")
