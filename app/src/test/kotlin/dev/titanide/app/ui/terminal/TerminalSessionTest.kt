@@ -219,4 +219,30 @@ class TerminalSessionTest {
             a.lines.none { it.text.startsWith("B") } && b.lines.none { it.text.startsWith("A") },
         )
     }
+
+    /**
+     * Each session can hold a live shell process. Before the limit was enforced, holding the
+     * "+" button created sessions until the app ran out of file descriptors.
+     */
+    @Test
+    fun `sessions stop at the configured limit and say why`() = runBlocking {
+        container.settings.updateTerminal { it.copy(maxSessions = 3) }
+        val viewModel = newViewModel()
+        repeat(2) { viewModel.newSession() }
+        assertEquals("the limit allows three sessions", 3, viewModel.state.value.sessions.size)
+
+        viewModel.newSession()
+
+        assertEquals("a fourth session must be refused", 3, viewModel.state.value.sessions.size)
+        assertTrue(
+            "the refusal must be visible, lines=${viewModel.state.value.active!!.lines.map { it.text }}",
+            viewModel.state.value.active!!.lines.any {
+                it.isError && it.text.contains("Session limit reached")
+            },
+        )
+
+        viewModel.closeSession(2)
+        viewModel.newSession()
+        assertEquals("closing one frees a slot", 3, viewModel.state.value.sessions.size)
+    }
 }

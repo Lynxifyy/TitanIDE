@@ -64,6 +64,10 @@ fun TerminalScreen() {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var input by remember { mutableStateOf("") }
     val session = state.active
+    // The terminal font size is a setting; it used to be hardcoded to 13sp here.
+    val fontSize = (container.settings.settings.collectAsStateWithLifecycle(initialValue = null).value
+        ?.terminal?.fontSize ?: 13).coerceIn(9, 24)
+    val lineHeight = (fontSize * 1.4f).sp
 
     Column(Modifier.fillMaxSize()) {
         TitanTopBar(
@@ -146,8 +150,8 @@ fun TerminalScreen() {
                             text = line.text,
                             style = TextStyle(
                                 fontFamily = FontFamily.Monospace,
-                                fontSize = 11.5.sp,
-                                lineHeight = 16.sp,
+                                fontSize = fontSize.sp,
+                                lineHeight = lineHeight,
                             ),
                             color = when {
                                 line.isCommand -> TitanColors.Secondary
@@ -176,7 +180,7 @@ fun TerminalScreen() {
                 ) {
                     Text(
                         "$",
-                        style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp),
+                        style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = fontSize.sp),
                         color = TitanColors.Success,
                     )
                     Spacer(Modifier.width(8.dp))
@@ -208,7 +212,7 @@ fun TerminalScreen() {
                             },
                         textStyle = TextStyle(
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 13.sp,
+                            fontSize = fontSize.sp,
                             color = TitanColors.TextPrimary,
                         ),
                         cursorBrush = SolidColor(TitanColors.Primary),
@@ -223,7 +227,7 @@ fun TerminalScreen() {
                             if (input.isEmpty()) {
                                 Text(
                                     "Enter a command",
-                                    style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp),
+                                    style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = fontSize.sp),
                                     color = TitanColors.TextMuted.copy(alpha = 0.6f),
                                 )
                             }

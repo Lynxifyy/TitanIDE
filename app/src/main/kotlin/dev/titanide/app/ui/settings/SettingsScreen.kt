@@ -555,6 +555,47 @@ fun SettingsScreen() {
                 }
             }
 
+            // --- Terminal ---------------------------------------------------
+            Text("Terminal", style = MaterialTheme.typography.titleSmall, color = TitanColors.TextPrimary)
+            TitanCard {
+                Column(Modifier.padding(12.dp)) {
+                    Text(
+                        "Font size: ${settings?.terminal?.fontSize ?: 13}sp",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TitanColors.TextMuted,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(11, 13, 16, 20).forEach { size ->
+                            FilterChip(
+                                selected = (settings?.terminal?.fontSize ?: 13) == size,
+                                onClick = { viewModel.setTerminalFontSize(size) },
+                                label = { Text("$size", style = MaterialTheme.typography.labelSmall) },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Open sessions: ${settings?.terminal?.maxSessions ?: 4}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TitanColors.TextMuted,
+                    )
+                    Text(
+                        "Each session can hold a running command",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TitanColors.TextMuted,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(2, 4, 8).forEach { count ->
+                            FilterChip(
+                                selected = (settings?.terminal?.maxSessions ?: 4) == count,
+                                onClick = { viewModel.setTerminalMaxSessions(count) },
+                                label = { Text("$count", style = MaterialTheme.typography.labelSmall) },
+                            )
+                        }
+                    }
+                }
+            }
+
             // --- Toolchain --------------------------------------------------
             Text("Toolchain", style = MaterialTheme.typography.titleSmall, color = TitanColors.TextPrimary)
             TitanCard {

@@ -75,7 +75,19 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
         }
     }
 
+    /**
+     * Each session can hold a live `sh` process, so the configured limit is enforced here.
+     * Without it, holding the "+" button spawned shells until the app was killed.
+     */
     fun newSession() {
+        val limit = container.currentSettings()?.terminal?.maxSessions?.coerceIn(1, 12) ?: DEFAULT_MAX_SESSIONS
+        if (_state.value.sessions.size >= limit) {
+            appendLine(
+                "Session limit reached ($limit). Close a session before opening another.",
+                isError = true,
+            )
+            return
+        }
         val id = "term-${sessionCounter.incrementAndGet()}"
         val cwd = container.storage.projectsRoot.absolutePath
         val session = TerminalSessionState(
@@ -83,8 +95,10 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
             title = "session ${_state.value.sessions.size + 1}",
             cwd = cwd,
         )
-        val sessions = _state.value.sessions + session
-        _state.update { it.copy(sessions = sessions, activeIndex = sessions.lastIndex) }
+        _state.update {
+            val sessions = it.sessions + session
+            it.copy(sessions = sessions, activeIndex = sessions.lastIndex)
+        }
     }
 
     fun closeSession(index: Int) {
@@ -292,5 +306,6 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
 
     companion object {
         private const val MAX_LINES = 2000
+        private const val DEFAULT_MAX_SESSIONS = 4
     }
 }

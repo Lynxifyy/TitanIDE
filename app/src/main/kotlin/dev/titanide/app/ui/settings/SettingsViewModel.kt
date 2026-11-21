@@ -380,6 +380,14 @@ class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
         viewModelScope.launch { container.settings.updateEditor { it.copy(autoSave = enabled) } }
     }
 
+    fun setTerminalFontSize(size: Int) {
+        viewModelScope.launch { container.settings.updateTerminal { it.copy(fontSize = size.coerceIn(9, 24)) } }
+    }
+
+    fun setTerminalMaxSessions(count: Int) {
+        viewModelScope.launch { container.settings.updateTerminal { it.copy(maxSessions = count.coerceIn(1, 12)) } }
+    }
+
     fun clearMessage() {
         _state.update { it.copy(message = null) }
     }
