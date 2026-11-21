@@ -82,6 +82,8 @@ fun WorkbenchScreen(
     val diagnostics by viewModel.diagnostics.collectAsStateWithLifecycle()
     val expanded by viewModel.expanded.collectAsStateWithLifecycle()
     val searchHits by viewModel.searchHits.collectAsStateWithLifecycle()
+    val find by viewModel.find.collectAsStateWithLifecycle()
+    val revealToken by viewModel.revealRequests.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val build by viewModel.build.collectAsStateWithLifecycle()
     val logs by viewModel.buildLogs.collectAsStateWithLifecycle()
@@ -148,7 +150,8 @@ fun WorkbenchScreen(
                         agent = agent,
                         onToggleExpanded = viewModel::toggleExpanded,
                         onOpenFile = viewModel::openFile,
-                        onOpenHit = { hit -> viewModel.openFile(hit.path) },
+                        onOpenHit = { hit -> viewModel.openFileAtLine(hit.path, hit.line) },
+                        onOpenFindInFile = { replace -> viewModel.openFind(replace) },
                         onSearch = viewModel::search,
                         onNewFile = { prompt = NamePrompt.NewFile },
                         onNewFolder = { prompt = NamePrompt.NewFolder },
@@ -200,6 +203,15 @@ fun WorkbenchScreen(
                                 onFormat = viewModel::formatDocument,
                                 modifier = Modifier.weight(1f).fillMaxHeight(),
                                 showGutter = active || state.groups.size == 1,
+                                find = find,
+                                revealToken = revealToken,
+                                onFindQueryChange = viewModel::setFindQuery,
+                                onFindReplaceChange = viewModel::setFindReplacement,
+                                onFindNext = viewModel::findNext,
+                                onFindPrevious = viewModel::findPrevious,
+                                onReplaceCurrent = viewModel::replaceCurrent,
+                                onReplaceAll = viewModel::replaceAll,
+                                onCloseFind = viewModel::closeFind,
                             )
                         }
                     }
@@ -295,7 +307,8 @@ fun WorkbenchScreen(
                     agent = agent,
                     onToggleExpanded = viewModel::toggleExpanded,
                     onOpenFile = viewModel::openFile,
-                    onOpenHit = { hit -> viewModel.openFile(hit.path) },
+                    onOpenHit = { hit -> viewModel.openFileAtLine(hit.path, hit.line) },
+                    onOpenFindInFile = { replace -> viewModel.openFind(replace) },
                     onSearch = viewModel::search,
                     onNewFile = { prompt = NamePrompt.NewFile },
                     onNewFolder = { prompt = NamePrompt.NewFolder },
@@ -431,6 +444,7 @@ private fun SidebarHost(
     onToggleExpanded: (String) -> Unit,
     onOpenFile: (String) -> Unit,
     onOpenHit: (SearchHit) -> Unit,
+    onOpenFindInFile: (Boolean) -> Unit,
     onSearch: (String) -> Unit,
     onNewFile: () -> Unit,
     onNewFolder: () -> Unit,
@@ -508,6 +522,7 @@ private fun SidebarHost(
                 },
                 hits = searchHits,
                 onOpenHit = onOpenHit,
+                onOpenFindInFile = onOpenFindInFile,
             )
 
             Activity.SOURCE_CONTROL -> SourceControlSidebar(

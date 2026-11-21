@@ -18,11 +18,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -39,9 +42,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -73,6 +76,15 @@ fun EditorArea(
     onFormat: () -> Unit,
     modifier: Modifier = Modifier,
     showGutter: Boolean = true,
+    find: FindState = FindState(),
+    revealToken: Long = 0L,
+    onFindQueryChange: (String) -> Unit = {},
+    onFindReplaceChange: (String) -> Unit = {},
+    onFindNext: () -> Unit = {},
+    onFindPrevious: () -> Unit = {},
+    onReplaceCurrent: () -> Unit = {},
+    onReplaceAll: () -> Unit = {},
+    onCloseFind: () -> Unit = {},
 ) {
     Column(modifier = modifier.fillMaxSize().background(TitanColors.Canvas)) {
         if (group.tabs.isNotEmpty()) {
@@ -91,13 +103,28 @@ fun EditorArea(
                 onChange = onChange,
                 modifier = Modifier.weight(1f),
                 showGutter = showGutter,
+                activeMatch = find.current,
+                revealToken = revealToken,
             )
+            if (find.open) {
+                FindBar(
+                    find = find,
+                    onQueryChange = onFindQueryChange,
+                    onReplaceChange = onFindReplaceChange,
+                    onNext = onFindNext,
+                    onPrevious = onFindPrevious,
+                    onReplaceCurrent = onReplaceCurrent,
+                    onReplaceAll = onReplaceAll,
+                    onClose = onCloseFind,
+                )
+            }
             EditorStatusStrip(
                 buffer = buffer,
                 diagnostics = diagnostics,
                 onSave = onSave,
                 onToggleComment = onToggleComment,
                 onFormat = onFormat,
+                onFind = { onFindQueryChange(find.query) },
             )
         } else {
             NoFileOpen()
@@ -208,6 +235,8 @@ private fun CodeSurface(
     onChange: (String, Int) -> Unit,
     modifier: Modifier = Modifier,
     showGutter: Boolean = true,
+    activeMatch: IntRange? = null,
+    revealToken: Long = 0L,
 ) {
     val fontSize = 12
     val lineHeight = 18
@@ -236,6 +265,17 @@ private fun CodeSurface(
                 selection = TextRange(buffer.caret.coerceIn(0, buffer.content.length)),
             )
         }
+    }
+
+    // A caret move that changes no characters (a search hit, find-next) is invisible to the
+    // effect above, so the view model bumps a token when it wants the caret shown. Only that
+    // path forces the selection; syncing on every caret change would collapse a dragged range.
+    LaunchedEffect(revealToken) {
+        if (revealToken == 0L) return@LaunchedEffect
+        val caret = buffer.caret.coerceIn(0, buffer.content.length)
+        fieldValue = fieldValue.copy(selection = TextRange(caret))
+        val lineIndex = buffer.content.take(caret).count { it == '\n' }
+        vertical.animateScrollTo((lineIndex * lineHeight - 40).coerceAtLeast(0))
     }
 
     Row(modifier = modifier.fillMaxSize()) {
@@ -323,6 +363,7 @@ private fun EditorStatusStrip(
     onSave: () -> Unit,
     onToggleComment: () -> Unit,
     onFormat: () -> Unit,
+    onFind: () -> Unit,
 ) {
     val errors = diagnostics.count { it.severity == Severity.ERROR }
     val warnings = diagnostics.count { it.severity == Severity.WARNING }
@@ -341,10 +382,107 @@ private fun EditorStatusStrip(
             StatusChip("No problems", TitanColors.Success)
         }
         Spacer(Modifier.weight(1f))
+        ActionChip("Find", onFind)
         ActionChip("Comment", onToggleComment)
         ActionChip("Format", onFormat)
         ActionChip(if (buffer.dirty) "Save *" else "Saved", onSave)
     }
+}
+
+/**
+ * In-file find and replace. Kept compact and above the status strip so it never covers code
+ * while the keyboard is up.
+ */
+@Composable
+private fun FindBar(
+    find: FindState,
+    onQueryChange: (String) -> Unit,
+    onReplaceChange: (String) -> Unit,
+    onNext: () -> Unit,
+    onPrevious: () -> Unit,
+    onReplaceCurrent: () -> Unit,
+    onReplaceAll: () -> Unit,
+    onClose: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(TitanColors.CanvasElevated)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            DenseTextField(
+                value = find.query,
+                onValueChange = onQueryChange,
+                placeholder = "Find",
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = if (find.count == 0) "0/0" else "${find.activeIndex + 1}/${find.count}",
+                color = if (find.count == 0) TitanColors.TextMuted else TitanColors.Secondary,
+                fontSize = 10.sp,
+                modifier = Modifier.padding(horizontal = 6.dp),
+            )
+            DenseIconButton(
+                icon = Icons.Filled.KeyboardArrowUp,
+                contentDescription = "Previous match",
+                onClick = onPrevious,
+            )
+            DenseIconButton(
+                icon = Icons.Filled.KeyboardArrowDown,
+                contentDescription = "Next match",
+                onClick = onNext,
+            )
+            DenseIconButton(
+                icon = Icons.Filled.Close,
+                contentDescription = "Close find",
+                onClick = onClose,
+            )
+        }
+        if (find.replaceMode) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                DenseTextField(
+                    value = find.replacement,
+                    onValueChange = onReplaceChange,
+                    placeholder = "Replace with",
+                    modifier = Modifier.weight(1f),
+                )
+                ActionChip("Replace", onReplaceCurrent)
+                ActionChip("All", onReplaceAll)
+            }
+        }
+    }
+}
+
+/** Minimal single-line field sized for a toolbar row. */
+@Composable
+private fun DenseTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+) {
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        singleLine = true,
+        textStyle = TextStyle(
+            color = TitanColors.TextPrimary,
+            fontSize = 11.5.sp,
+            fontFamily = FontFamily.Monospace,
+        ),
+        cursorBrush = SolidColor(TitanColors.Primary),
+        modifier = modifier
+            .background(TitanColors.Canvas, RoundedCornerShape(4.dp))
+            .padding(horizontal = 6.dp, vertical = 5.dp),
+        decorationBox = { inner ->
+            if (value.isEmpty()) {
+                Text(placeholder, color = TitanColors.TextMuted, fontSize = 11.5.sp)
+            }
+            inner()
+        },
+    )
 }
 
 @Composable

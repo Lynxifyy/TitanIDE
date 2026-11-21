@@ -63,6 +63,22 @@ data class BufferState(
 data class SearchHit(val path: String, val line: Int, val text: String)
 
 /**
+ * In-file find and replace. [matches] are character offsets into the buffer so the editor can
+ * select one without re-running the search; [activeIndex] is the match the user is on.
+ */
+data class FindState(
+    val open: Boolean = false,
+    val query: String = "",
+    val replacement: String = "",
+    val replaceMode: Boolean = false,
+    val matches: List<IntRange> = emptyList(),
+    val activeIndex: Int = 0,
+) {
+    val current: IntRange? get() = matches.getOrNull(activeIndex)
+    val count: Int get() = matches.size
+}
+
+/**
  * Drives the workbench: real project files through [SafeFileSystem], real diagnostics
  * through CodeGuard, real builds through the shared BuildEngine, and the real OpenCode
  * session. The Compose layer only renders this state and forwards intents.
@@ -92,6 +108,13 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
 
     private val _searchHits = MutableStateFlow<List<SearchHit>>(emptyList())
     val searchHits: StateFlow<List<SearchHit>> = _searchHits.asStateFlow()
+
+    private val _find = MutableStateFlow(FindState())
+    val find: StateFlow<FindState> = _find.asStateFlow()
+
+    /** Bumped whenever something must scroll the caret into view. */
+    private val _revealRequests = MutableStateFlow(0L)
+    val revealRequests: StateFlow<Long> = _revealRequests.asStateFlow()
 
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
@@ -177,6 +200,41 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
     }
 
     // ---------------------------------------------------------------- tabs
+
+    /**
+     * Opens a file and puts the caret on [line] (1-based), so a project-search hit lands where
+     * the user clicked instead of at the top of the file.
+     */
+    fun openFileAtLine(path: String, line: Int) {
+        openFile(path)
+        viewModelScope.launch {
+            // openFile reads from disk asynchronously, so wait for the buffer to exist.
+            val deadline = System.currentTimeMillis() + 5_000
+            while (_buffers.value[path] == null && System.currentTimeMillis() < deadline) {
+                kotlinx.coroutines.delay(20)
+            }
+            val buffer = _buffers.value[path] ?: return@launch
+            moveCaretTo(path, offsetOfLine(buffer.content, line))
+        }
+    }
+
+    private fun offsetOfLine(content: String, line: Int): Int {
+        if (line <= 1) return 0
+        var seen = 1
+        content.forEachIndexed { index, ch ->
+            if (ch == '\n') {
+                seen++
+                if (seen == line) return index + 1
+            }
+        }
+        return content.length
+    }
+
+    /** Moves the caret and asks the editor to scroll it into view. */
+    private fun moveCaretTo(path: String, offset: Int) {
+        setCaret(path, offset)
+        _revealRequests.value = _revealRequests.value + 1
+    }
 
     fun openFile(path: String) {
         val project = _project.value ?: return
@@ -390,6 +448,93 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
     }
 
     // --------------------------------------------------------------- search
+
+    // ----------------------------------------------------------------- find in file
+
+    fun openFind(replaceMode: Boolean = false) {
+        _find.value = _find.value.copy(open = true, replaceMode = replaceMode)
+    }
+
+    fun closeFind() {
+        _find.value = FindState()
+    }
+
+    fun setFindQuery(query: String) {
+        val active = activePath()
+        val content = active?.let { _buffers.value[it]?.content }.orEmpty()
+        val matches = matchRanges(content, query)
+        // Keep the user near where they were: prefer the first match at or after the caret.
+        val caret = active?.let { _buffers.value[it]?.caret } ?: 0
+        val start = matches.indexOfFirst { it.first >= caret }.coerceAtLeast(0)
+        _find.value = _find.value.copy(query = query, matches = matches, activeIndex = start)
+        active?.let { path -> matches.getOrNull(start)?.let { moveCaretTo(path, it.first) } }
+    }
+
+    fun setFindReplacement(text: String) {
+        _find.value = _find.value.copy(replacement = text)
+    }
+
+    fun findNext() {
+        val state = _find.value
+        if (state.matches.isEmpty()) return
+        val next = (state.activeIndex + 1) % state.matches.size
+        _find.value = state.copy(activeIndex = next)
+        activePath()?.let { path -> state.matches[next].let { moveCaretTo(path, it.first) } }
+    }
+
+    fun findPrevious() {
+        val state = _find.value
+        if (state.matches.isEmpty()) return
+        val previous = if (state.activeIndex <= 0) state.matches.lastIndex else state.activeIndex - 1
+        _find.value = state.copy(activeIndex = previous)
+        activePath()?.let { path -> state.matches[previous].let { moveCaretTo(path, it.first) } }
+    }
+
+    /** Replaces the current match. Literal text only, so a `$` in the replacement is safe. */
+    fun replaceCurrent() {
+        val path = activePath() ?: return
+        val buffer = _buffers.value[path] ?: return
+        val match = _find.value.current ?: return
+        val updated = buffer.content.replaceRange(match.first, match.last + 1, _find.value.replacement)
+        edit(path, updated)
+        val matches = matchRanges(updated, _find.value.query)
+        val next = matches.indexOfFirst { it.first > match.first }.coerceAtLeast(0)
+        _find.value = _find.value.copy(matches = matches, activeIndex = next)
+        matches.getOrNull(next)?.let { moveCaretTo(path, it.first) }
+    }
+
+    fun replaceAll() {
+        val path = activePath() ?: return
+        val buffer = _buffers.value[path] ?: return
+        val state = _find.value
+        if (state.query.isEmpty() || state.matches.isEmpty()) return
+        val updated = StringBuilder()
+        var cursor = 0
+        state.matches.forEach { match ->
+            updated.append(buffer.content, cursor, match.first)
+            updated.append(state.replacement)
+            cursor = match.last + 1
+        }
+        updated.append(buffer.content, cursor, buffer.content.length)
+        val replaced = state.matches.size
+        edit(path, updated.toString())
+        _find.value = state.copy(matches = emptyList(), activeIndex = 0)
+        _message.value = "Replaced $replaced occurrence(s) of \"${state.query}\""
+    }
+
+    private fun activePath(): String? = _state.value.activeTab?.path
+
+    /** All non-overlapping literal occurrences of [query], in buffer order. */
+    private fun matchRanges(content: String, query: String): List<IntRange> {
+        if (query.isEmpty()) return emptyList()
+        val ranges = ArrayList<IntRange>()
+        var index = content.indexOf(query)
+        while (index >= 0) {
+            ranges += index until (index + query.length)
+            index = content.indexOf(query, index + query.length)
+        }
+        return ranges
+    }
 
     fun search(query: String) {
         searchJob?.cancel()

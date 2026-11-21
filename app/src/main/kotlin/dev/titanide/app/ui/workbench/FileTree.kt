@@ -4,6 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,11 +19,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -258,6 +259,7 @@ fun SearchView(
     hits: List<SearchHit>,
     onOpenHit: (SearchHit) -> Unit,
     modifier: Modifier = Modifier,
+    onOpenFindInFile: (replace: Boolean) -> Unit = {},
 ) {
     androidx.compose.foundation.layout.Column(modifier = modifier.fillMaxWidth()) {
         PanelHeader(title = "Search")
@@ -269,6 +271,30 @@ fun SearchView(
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp, vertical = 4.dp),
         )
+        // Project search finds files; these switch to find/replace inside the open file.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "Find in file",
+                color = TitanColors.Secondary,
+                fontSize = 10.5.sp,
+                modifier = Modifier
+                    .clickable { onOpenFindInFile(false) }
+                    .padding(vertical = 3.dp),
+            )
+            Text(
+                text = "Replace in file",
+                color = TitanColors.Secondary,
+                fontSize = 10.5.sp,
+                modifier = Modifier
+                    .clickable { onOpenFindInFile(true) }
+                    .padding(vertical = 3.dp),
+            )
+        }
         if (query.isNotBlank() && hits.isEmpty()) {
             Text(
                 text = "No results",
