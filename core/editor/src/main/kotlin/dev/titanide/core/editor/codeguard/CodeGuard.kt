@@ -24,7 +24,7 @@ class CodeGuard {
         val diagnostics = ArrayList<Diagnostic>()
 
         diagnostics += checkUnbalancedBrackets(text, tokens, language, filePath)
-        diagnostics += checkUnterminatedStrings(text, tokens, filePath)
+        diagnostics += checkUnterminatedStrings(text, tokens, language, filePath)
         diagnostics += checkTrailingCommas(text, language, filePath)
         diagnostics += checkDuplicateModifiers(text, tokens, filePath)
         diagnostics += checkSuspiciousIdentifiers(text, tokens, language, filePath)
@@ -95,61 +95,131 @@ class CodeGuard {
     }
 
     /** A quote run that reaches end-of-line without closing is an unterminated literal. */
-    private fun checkUnterminatedStrings(text: String, tokens: List<Token>, filePath: String): List<Diagnostic> {
+    /**
+     * A string is unterminated when a quote opens on a line and nothing closes it.
+     *
+     * Counting quote characters per line cannot answer that: an escaped quote, a char
+     * literal such as `'"'`, a comment mentioning an apostrophe, and a raw `"""` block all
+     * put the count off by one on lines that are perfectly valid. The previous version
+     * reported 327 of those on this repository's own sources. This one walks the line and
+     * tracks the real lexical state instead.
+     */
+    private fun checkUnterminatedStrings(
+        text: String,
+        tokens: List<Token>,
+        language: Language,
+        filePath: String,
+    ): List<Diagnostic> {
         val out = ArrayList<Diagnostic>()
-        var lineStart = 0
+        val quoteStyle = QuoteStyle.of(language) ?: return out
+        val lineComment = language.lineComment
+        val blockComment = language.blockComment?.first
+
+        var offset = 0
+        var rawBlockOpen = false
         text.split('\n').forEachIndexed { lineIndex, line ->
-            val withoutStrings = stripCompleteStrings(line)
-            val singleQuotes = withoutStrings.count { it == '\'' }
-            val doubleQuotes = withoutStrings.count { it == '"' }
-            if (singleQuotes % 2 != 0 || doubleQuotes % 2 != 0) {
-                val inComment = tokens.any {
-                    it.type == TokenType.COMMENT && it.start in lineStart until (lineStart + line.length + 1)
-                }
-                if (!inComment) {
+            val inComment = tokens.any {
+                it.type == TokenType.COMMENT &&
+                    it.start <= offset && offset <= it.end
+            }
+            if (!inComment && !rawBlockOpen) {
+                val open = firstUnterminatedQuote(line, quoteStyle, lineComment, blockComment)
+                if (open != null) {
                     out += Diagnostic(
                         filePath = filePath,
                         line = lineIndex,
-                        column = line.indexOfFirst { it == '"' || it == '\'' }.coerceAtLeast(0),
+                        column = open,
                         severity = Severity.ERROR,
                         message = "Unterminated string literal",
                         source = "codeguard.syntax",
                     )
                 }
             }
-            lineStart += line.length + 1
+            if (quoteStyle.rawBlock != null) {
+                rawBlockOpen = togglesRawBlock(line, quoteStyle.rawBlock, rawBlockOpen)
+            }
+            offset += line.length + 1
         }
         return out
     }
 
-    private fun stripCompleteStrings(line: String): String {
-        val builder = StringBuilder(line.length)
+    /** Index of a quote that opens on [line] and never closes, or null. */
+    private fun firstUnterminatedQuote(
+        line: String,
+        style: QuoteStyle,
+        lineComment: String?,
+        blockComment: String?,
+    ): Int? {
         var i = 0
         while (i < line.length) {
             val c = line[i]
-            if (c == '"' || c == '\'') {
+            if (lineComment != null && line.startsWith(lineComment, i)) return null
+            if (blockComment != null && line.startsWith(blockComment, i)) return null
+            if (c == '\'' && style.charLiterals) {
+                // A char literal holds exactly one character or one escape sequence.
+                val width = if (i + 1 < line.length && line[i + 1] == '\\') 4 else 3
+                i += width
+                continue
+            }
+            if (c in style.quotes) {
+                if (style.rawBlock != null && line.startsWith(style.rawBlock, i)) return null
                 var j = i + 1
-                var closed = false
                 while (j < line.length) {
                     if (line[j] == '\\') {
                         j += 2
                         continue
                     }
-                    if (line[j] == c) {
-                        closed = true
-                        break
-                    }
+                    if (line[j] == c) break
                     j++
                 }
-                if (closed) {
-                    i = j + 1
-                    continue
-                }
+                if (j >= line.length) return i
+                i = j + 1
+                continue
             }
-            builder.append(c)
             i++
         }
-        return builder.toString()
+        return null
+    }
+
+    private fun togglesRawBlock(line: String, marker: String, open: Boolean): Boolean {
+        var count = 0
+        var index = line.indexOf(marker)
+        while (index >= 0) {
+            count++
+            index = line.indexOf(marker, index + marker.length)
+        }
+        return if (count % 2 == 0) open else !open
+    }
+
+    /**
+     * Which characters delimit a string on one line, whether a raw block form exists, and
+     * whether `'` means a character literal rather than a string.
+     *
+     * The distinction matters: in Kotlin `'"'` is a char literal holding a quote, so treating
+     * `"` as a string opener there reports an unterminated string on correct code. That was
+     * the remaining source of false positives after the first pass.
+     */
+    private data class QuoteStyle(
+        val quotes: Set<Char>,
+        val rawBlock: String?,
+        val charLiterals: Boolean = false,
+    ) {
+        companion object {
+            fun of(language: Language): QuoteStyle? = when (language) {
+                Language.KOTLIN -> QuoteStyle(setOf('"'), "\"\"\"", charLiterals = true)
+                Language.JAVA -> QuoteStyle(setOf('"'), "\"\"\"", charLiterals = true)
+                Language.CSHARP -> QuoteStyle(setOf('"'), null, charLiterals = true)
+                Language.RUST -> QuoteStyle(setOf('"'), null, charLiterals = true)
+                Language.DART -> QuoteStyle(setOf('"', '\''), null, charLiterals = true)
+                Language.C, Language.CPP -> QuoteStyle(setOf('"'), null, charLiterals = true)
+                Language.PYTHON -> QuoteStyle(setOf('"', '\''), "\"\"\"")
+                Language.JAVASCRIPT, Language.TYPESCRIPT -> QuoteStyle(setOf('"', '\'', '`'), null)
+                Language.GO -> QuoteStyle(setOf('"', '`'), null, charLiterals = true)
+                Language.PHP, Language.RUBY, Language.LUA, Language.SHELL ->
+                    QuoteStyle(setOf('"', '\''), null)
+                else -> null
+            }
+        }
     }
 
     private fun checkTrailingCommas(text: String, language: Language, filePath: String): List<Diagnostic> {
@@ -195,8 +265,13 @@ class CodeGuard {
     }
 
     /**
-     * Level 1: catches typos that are unambiguous regardless of the project — a keyword
-     * misspelled by one or two edits (`fucntion`, `retrun`, `improt`).
+     * Level 1: catches a keyword misspelled by one edit (`fucntion`, `retrun`, `improt`).
+     *
+     * Only one edit is allowed, and only when the word keeps the keyword's first character.
+     * Two edits, or a shared prefix of one letter, matches an enormous amount of ordinary
+     * code: on this repository's own sources the previous rule flagged 4177 identifiers,
+     * every one of them a correctly spelled name. A checker that cries wolf that often is
+     * worse than no checker, because the real typo is buried in the noise.
      */
     private fun checkSuspiciousIdentifiers(
         text: String,
@@ -207,11 +282,19 @@ class CodeGuard {
         val keywords = keywordsFor(language)
         if (keywords.isEmpty()) return emptyList()
         val out = ArrayList<Diagnostic>()
+        // A word the file declares is a symbol, not a typo, however close it sits to a keyword.
+        // `cost` and `cont` are one edit from `const`; flagging every such local would put a
+        // marker on ordinary code.
+        val declared = declaredNames(text, language)
+        val quotedSpans = backtickSpans(text)
 
         for (token in tokens) {
             if (token.type != TokenType.IDENTIFIER) continue
             val word = text.substring(token.start, token.end)
             if (word.length < 4) continue
+            if (word in keywords || word in declared) continue
+            // `fun \`invalid regex returns no matches\`()` — text inside backticks is prose.
+            if (quotedSpans.any { token.start in it }) continue
             val close = nearestKeyword(word, keywords) ?: continue
             out += diagAt(
                 text, token.start, Severity.WARNING,
@@ -219,27 +302,70 @@ class CodeGuard {
                 quickFix = QuickFix(
                     title = "Replace with '$close'",
                     kind = QuickFixKind.REPLACE_RANGE,
-                    replacement = close,
                     startOffset = token.start,
                     endOffset = token.end,
+                    replacement = close,
                 ),
             )
         }
         return out
     }
 
+    /** Offsets covered by backticks, which in Kotlin delimit names written as prose. */
+    private fun backtickSpans(text: String): List<IntRange> {
+        val spans = ArrayList<IntRange>()
+        var open = -1
+        text.forEachIndexed { index, c ->
+            if (c != '`') return@forEachIndexed
+            if (open < 0) {
+                open = index
+            } else {
+                spans += open..index
+                open = -1
+            }
+        }
+        return spans
+    }
+
     private fun nearestKeyword(word: String, keywords: Set<String>): String? {
         var best: String? = null
-        var bestDistance = Int.MAX_VALUE
         for (keyword in keywords) {
-            if (kotlin.math.abs(keyword.length - word.length) > 2) continue
-            val distance = levenshtein(word, keyword)
-            if (distance in 1..2 && distance < bestDistance) {
-                bestDistance = distance
+            if (keyword[0] != word[0]) continue
+            if (kotlin.math.abs(keyword.length - word.length) > 1) continue
+            if (damerauLevenshtein(word, keyword) == 1) {
+                // Two keywords one edit away means the intent is ambiguous; say nothing.
+                if (best != null) return null
                 best = keyword
             }
         }
         return best
+    }
+
+    /**
+     * Edit distance where swapping two adjacent characters costs one edit.
+     *
+     * Plain Levenshtein scores a transposition as two, so the most common typing mistake
+     * there is — `fucntion`, `retrun`, `improt` — would not register as a single-edit typo.
+     */
+    private fun damerauLevenshtein(a: String, b: String): Int {
+        if (a == b) return 0
+        if (a.isEmpty()) return b.length
+        if (b.isEmpty()) return a.length
+        val rows = a.length + 1
+        val cols = b.length + 1
+        val d = Array(rows) { IntArray(cols) }
+        for (i in 0 until rows) d[i][0] = i
+        for (j in 0 until cols) d[0][j] = j
+        for (i in 1 until rows) {
+            for (j in 1 until cols) {
+                val cost = if (a[i - 1] == b[j - 1]) 0 else 1
+                d[i][j] = minOf(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost)
+                if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1]) {
+                    d[i][j] = minOf(d[i][j], d[i - 2][j - 2] + 1)
+                }
+            }
+        }
+        return d[a.length][b.length]
     }
 
     private fun levenshtein(a: String, b: String): Int {
@@ -287,6 +413,14 @@ class CodeGuard {
      * known library/builtin name. Receiver calls (`obj.name(`) are skipped because their
      * target lives in another file.
      */
+    /**
+     * Reports calls to names this file never declares.
+     *
+     * This is a single-file heuristic: a name defined in another file of the same project is
+     * invisible here, so most matches on real code are correct code. It is therefore a HINT,
+     * not a warning, and the message says which scope it looked at. Raising it to a warning
+     * would put a marker on nearly every line of a well-factored project.
+     */
     private fun checkUndefinedReferences(
         text: String,
         tokens: List<Token>,
@@ -304,13 +438,21 @@ class CodeGuard {
             val prevChar = text.getOrNull(token.start - 1)
             if (prevChar == '.' || prevChar == ':') continue
             out += diagAt(
-                text, token.start, Severity.WARNING,
-                "'$word' is not declared in this file", filePath,
+                text, token.start, Severity.HINT,
+                "'$word' is not declared in this file (it may come from an import)", filePath,
             )
         }
         return out
     }
 
+    /**
+     * A local declared and never read again.
+     *
+     * The count is over uses *after* the declaration, and constructor properties are excluded:
+     * `val projectId: String,` in a data class is read from other files, so counting only this
+     * file made every data-class property look unused. That was 421 wrong warnings on this
+     * repository alone, which is enough to teach the user to ignore the panel.
+     */
     private fun checkUnusedLocals(text: String, language: Language, filePath: String): List<Diagnostic> {
         val out = ArrayList<Diagnostic>()
         val declRegex = when (language) {
@@ -324,7 +466,11 @@ class CodeGuard {
         declRegex.findAll(text).forEach { match ->
             val name = match.groupValues[1]
             if (name == "it" || name.startsWith("_")) return@forEach
-            if (Regex("\\b${Regex.escape(name)}\\b").findAll(text).count() <= 1) {
+            if (isConstructorProperty(text, match.range.first)) return@forEach
+            val usesAfter = Regex("\\b${Regex.escape(name)}\\b")
+                .findAll(text)
+                .count { it.range.first > match.range.last }
+            if (usesAfter == 0) {
                 out += diagAt(
                     text, match.range.first, Severity.WARNING,
                     "'$name' is declared but never used", filePath,
@@ -332,6 +478,21 @@ class CodeGuard {
             }
         }
         return out
+    }
+
+    /** True when the declaration sits inside a parameter list, i.e. it is a property. */
+    private fun isConstructorProperty(text: String, offset: Int): Boolean {
+        var depth = 0
+        var index = offset - 1
+        while (index >= 0) {
+            when (text[index]) {
+                ')', '}' -> depth++
+                '{' -> if (depth == 0) return false else depth--
+                '(' -> if (depth == 0) return true else depth--
+            }
+            index--
+        }
+        return false
     }
 
     private fun declaredNames(text: String, language: Language): Set<String> {
@@ -342,6 +503,11 @@ class CodeGuard {
                 Regex("\\b(?:val|var)\\s+([a-zA-Z_][A-Za-z0-9_]*)"),
                 Regex("\\b(?:class|interface|object|enum class)\\s+([A-Za-z_][A-Za-z0-9_]*)"),
                 Regex("\\btypealias\\s+([A-Za-z_][A-Za-z0-9_]*)"),
+                // Lambda parameters: `{ item -> ... }` and `{ (a, b) -> ... }`.
+                Regex("\\{\\s*([a-zA-Z_][A-Za-z0-9_]*)\\s*->"),
+                // Destructuring declarations: `val (a, b) = ...` and lambda destructuring.
+                Regex("\\b(?:val|var)\\s*\\(([^)]*)\\)"),
+                Regex("\\(\\s*([a-zA-Z_][A-Za-z0-9_]*(?:\\s*,\\s*[a-zA-Z_][A-Za-z0-9_]*)*)\\s*\\)\\s*->"),
             )
             Language.JAVA, Language.CSHARP -> listOf(
                 Regex("\\b(?:class|interface|enum|record|struct)\\s+([A-Za-z_][A-Za-z0-9_]*)"),
@@ -371,8 +537,12 @@ class CodeGuard {
         }
         patterns.forEach { pattern ->
             pattern.findAll(text).forEach { match ->
-                val captured = match.groupValues.getOrNull(1).orEmpty()
-                if (captured.isNotEmpty()) names += captured
+                // A group may hold several names (destructuring), so split on anything that
+                // cannot be part of an identifier.
+                match.groupValues.getOrNull(1).orEmpty()
+                    .split(Regex("[^A-Za-z0-9_]+"))
+                    .filter { it.isNotEmpty() }
+                    .forEach { names += it }
             }
         }
         return names
