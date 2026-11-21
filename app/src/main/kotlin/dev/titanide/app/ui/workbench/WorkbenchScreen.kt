@@ -202,6 +202,7 @@ fun WorkbenchScreen(
                                 onSave = viewModel::saveActive,
                                 onToggleComment = viewModel::toggleComment,
                                 onFormat = viewModel::formatDocument,
+                                onIndent = viewModel::indent,
                                 modifier = Modifier.weight(1f).fillMaxHeight(),
                                 showGutter = active || state.groups.size == 1,
                                 find = find,

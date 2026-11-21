@@ -74,6 +74,7 @@ fun EditorArea(
     onSave: () -> Unit,
     onToggleComment: () -> Unit,
     onFormat: () -> Unit,
+    onIndent: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     showGutter: Boolean = true,
     find: FindState = FindState(),
@@ -126,6 +127,7 @@ fun EditorArea(
                 onSave = onSave,
                 onToggleComment = onToggleComment,
                 onFormat = onFormat,
+                onIndent = onIndent,
                 onFind = { onFindQueryChange(find.query) },
             )
         } else {
@@ -366,6 +368,7 @@ private fun EditorStatusStrip(
     onSave: () -> Unit,
     onToggleComment: () -> Unit,
     onFormat: () -> Unit,
+    onIndent: (Boolean) -> Unit,
     onFind: () -> Unit,
 ) {
     val errors = diagnostics.count { it.severity == Severity.ERROR }
@@ -388,6 +391,9 @@ private fun EditorStatusStrip(
         ActionChip("Find", onFind)
         ActionChip("Comment", onToggleComment)
         ActionChip("Format", onFormat)
+        // The soft keyboard has no Tab key, so indenting a block needs these.
+        ActionChip("Outdent", { onIndent(true) })
+        ActionChip("Indent", { onIndent(false) })
         ActionChip(if (buffer.dirty) "Save *" else "Saved", onSave)
     }
 }

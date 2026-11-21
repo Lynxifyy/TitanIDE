@@ -4,6 +4,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.di.TitanContainer
 import dev.titanide.app.ui.workbench.BufferState
@@ -13,6 +14,7 @@ import dev.titanide.core.designsystem.TitanTheme
 import dev.titanide.core.model.Language
 import dev.titanide.core.workbench.EditorGroup
 import dev.titanide.core.workbench.EditorTab
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -52,6 +54,7 @@ class FindBarRenderTest {
                     onSave = {},
                     onToggleComment = {},
                     onFormat = {},
+                    onIndent = {},
                     find = find,
                     onFindQueryChange = onQueryChange,
                 )
@@ -92,5 +95,40 @@ class FindBarRenderTest {
         render(FindState(open = true, query = "count", replaceMode = true, matches = listOf(4..8)))
         compose.onNodeWithText("All").assertIsDisplayed()
         compose.onNodeWithText("Replace").assertIsDisplayed()
+    }
+
+    /**
+     * A phone keyboard has no Tab key, so these two chips are the only way to shift a block.
+     * They must be on screen and each must ask for its own direction.
+     */
+    @Test
+    @Config(qualifiers = "w411dp-h891dp-xhdpi")
+    fun theIndentChipsAreOnScreenAndAskForTheirDirection() {
+        val asked = mutableListOf<Boolean>()
+        compose.setContent {
+            TitanTheme {
+                EditorArea(
+                    group = EditorGroup(0).open(tab),
+                    buffer = buffer,
+                    diagnostics = emptyList(),
+                    rootName = "demo",
+                    onSelectTab = {},
+                    onCloseTab = {},
+                    onChange = { _, _ -> },
+                    onSave = {},
+                    onToggleComment = {},
+                    onFormat = {},
+                    onIndent = { asked += it },
+                    find = FindState(open = false),
+                    onFindQueryChange = {},
+                )
+            }
+        }
+        compose.waitForIdle()
+
+        compose.onNodeWithText("Indent").assertIsDisplayed().performClick()
+        compose.onNodeWithText("Outdent").assertIsDisplayed().performClick()
+
+        assertEquals("Indent asks to indent, Outdent asks to outdent", listOf(false, true), asked)
     }
 }

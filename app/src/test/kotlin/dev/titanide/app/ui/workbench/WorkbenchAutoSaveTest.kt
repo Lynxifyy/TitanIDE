@@ -12,6 +12,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -130,5 +131,34 @@ class WorkbenchAutoSaveTest {
         viewModel.save(path)
 
         awaitWritten(File(project.rootPath, path), "saved by hand\n")
+    }
+
+    /**
+     * The soft keyboard has no Tab key. `indent()` existed but nothing called it, so a block
+     * could not be indented on a phone at all.
+     */
+    @Test
+    fun `indent shifts the caret line and outdent puts it back`() = runBlocking {
+        val path = "indent.py"
+        val viewModel = openedWorkbench(path, "def f():\n    return 1\n")
+        viewModel.edit(path, "def f():\n    return 1\n", caret = 0)
+
+        viewModel.indent(outdent = false)
+
+        val indented = viewModel.buffers.value[path]!!.content
+        assertTrue(
+            "indenting the first line must push it right, was '$indented'",
+            indented.startsWith(" "),
+        )
+        val width = indented.indexOf("def")
+        assertTrue("the indent must use the configured width, was $width", width in 2..8)
+
+        viewModel.indent(outdent = true)
+
+        assertEquals(
+            "outdent must undo the indent",
+            "def f():\n    return 1\n",
+            viewModel.buffers.value[path]!!.content,
+        )
     }
 }
