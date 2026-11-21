@@ -352,6 +352,32 @@ class WorkbenchViewModel(
     fun activateTab(tabId: String) {
         _state.value = _state.value.activateTab(tabId)
         publishActive(tabId)
+        refreshFind(previousContent = null, caret = _buffers.value[tabId]?.caret ?: 0)
+    }
+
+    /**
+     * Keeps the recorded match ranges pointing at the query. A match is an offset range in one
+     * buffer, so it goes stale on any edit before it and is meaningless in another file.
+     */
+    private fun refreshFind(previousContent: String?, caret: Int) {
+        val state = _find.value
+        if (state.query.isEmpty()) return
+        val content = activePath()?.let { _buffers.value[it]?.content } ?: return
+        val matches = matchRanges(content, state.query)
+        // Keep the selection on the same occurrence when the text merely shifted.
+        val previous = state.current
+        val moved = previous != null && previousContent != null
+        val index = when {
+            matches.isEmpty() -> 0
+            moved -> {
+                val delta = content.length - previousContent.length
+                val target = (previous.first + delta).coerceAtLeast(0)
+                matches.indexOfFirst { it.first == target }.takeIf { it >= 0 }
+                    ?: matches.indexOfFirst { it.first >= caret }.coerceAtLeast(0)
+            }
+            else -> matches.indexOfFirst { it.first >= caret }.coerceAtLeast(0)
+        }
+        _find.value = state.copy(matches = matches, activeIndex = index)
     }
 
     private fun publishActive(path: String) {
@@ -393,6 +419,7 @@ class WorkbenchViewModel(
         _buffers.value = _buffers.value + (path to updated)
         _state.value = _state.value.setDirty(path, updated.dirty)
         publishActive(path)
+        refreshFind(previousContent = buffer.content, caret = updated.caret)
 
         debounceJobs.remove("analyze:$path")?.cancel()
         debounceJobs["analyze:$path"] = viewModelScope.launch {
@@ -504,6 +531,7 @@ class WorkbenchViewModel(
         _buffers.value = _buffers.value + (path to updated)
         _state.value = _state.value.setDirty(path, updated.dirty)
         publishActive(path)
+        refreshFind(previousContent = buffer.content, caret = updated.caret)
         analyze(updated)
     }
 

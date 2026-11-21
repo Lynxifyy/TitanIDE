@@ -323,6 +323,80 @@ class WorkbenchViewModelTest {
     }
 
     /**
+     * A match is a range of offsets in one buffer. Typing before a match moves it, so a replace
+     * against the ranges recorded before the edit rewrites whatever now sits at those offsets.
+     */
+    @Test
+    fun `replace uses the current text, not ranges recorded before an edit`() = runBlocking {
+        val id = scaffoldProject("bench-replace-stale")
+        val viewModel = WorkbenchViewModel(container)
+        viewModel.awaitProject(id)
+
+        val path = viewModel.firstKotlinFile()
+        viewModel.openFile(path)
+        withTimeout(10_000) { viewModel.buffers.first { it.containsKey(path) } }
+        viewModel.edit(path, "aaa foo zzz\n")
+        withTimeout(10_000) { viewModel.buffers.first { it.getValue(path).content == "aaa foo zzz\n" } }
+
+        viewModel.setFindQuery("foo")
+        withTimeout(10_000) { viewModel.find.first { it.matches.isNotEmpty() } }
+
+        // Typing before the match shifts it; the recorded range is now stale.
+        viewModel.edit(path, "0123456789 aaa foo zzz\n")
+        withTimeout(10_000) {
+            viewModel.buffers.first { it.getValue(path).content == "0123456789 aaa foo zzz\n" }
+        }
+
+        viewModel.replaceCurrent()
+        assertEquals(
+            "replace must rewrite the searched word, not whatever moved into its old offsets",
+            "0123456789 aaa  zzz\n",
+            viewModel.buffers.value.getValue(path).content,
+        )
+    }
+
+    /**
+     * Matches belong to the buffer they were found in. Searching in one file and switching tabs
+     * used to leave the other file's ranges in place, so a replace rewrote the wrong file.
+     */
+    @Test
+    fun `find matches follow the active tab`() = runBlocking {
+        val id = scaffoldProject("bench-find-scope")
+        val viewModel = WorkbenchViewModel(container)
+        viewModel.awaitProject(id)
+
+        val files = withTimeout(10_000) {
+            viewModel.projectTree.first { tree ->
+                tree.flattened().count { !it.isDirectory && it.path.endsWith(".kt") } >= 2
+            }
+        }.flattened().filter { !it.isDirectory && it.path.endsWith(".kt") }.map { it.path }
+        val first = files[0]
+        val second = files[1]
+
+        viewModel.openFile(first)
+        withTimeout(10_000) { viewModel.buffers.first { it.containsKey(first) } }
+        viewModel.edit(first, "alpha beta alpha\n")
+        withTimeout(10_000) { viewModel.buffers.first { it.getValue(first).content == "alpha beta alpha\n" } }
+        viewModel.setFindQuery("alpha")
+        assertEquals(2, withTimeout(10_000) { viewModel.find.first { it.matches.isNotEmpty() } }.matches.size)
+
+        viewModel.openFile(second)
+        withTimeout(10_000) { viewModel.buffers.first { it.containsKey(second) } }
+        withTimeout(10_000) { viewModel.state.first { it.activeTab?.path == second } }
+        viewModel.edit(second, "no match here\n")
+        withTimeout(10_000) { viewModel.buffers.first { it.getValue(second).content == "no match here\n" } }
+
+        assertEquals(
+            "a file with no occurrences must report no matches",
+            0,
+            viewModel.find.value.matches.size,
+        )
+        val before = viewModel.buffers.value.getValue(second).content
+        viewModel.replaceCurrent()
+        assertEquals("replace must not touch a file with no match", before, viewModel.buffers.value.getValue(second).content)
+    }
+
+    /**
      * Undo history belongs to the file it was recorded against. A single shared stack means undo
      * in a second file applies the first file's edit offsets to the second file's text, which
      * rewrites text the user never touched in that file.
