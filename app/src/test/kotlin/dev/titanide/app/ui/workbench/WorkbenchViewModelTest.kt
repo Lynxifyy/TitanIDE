@@ -323,6 +323,53 @@ class WorkbenchViewModelTest {
     }
 
     /**
+     * Closing a tab is the only thing that discards a buffer, and the buffer is the only copy of
+     * unsaved edits. Closing a dirty tab therefore asks first, and only the confirmed path drops
+     * the work.
+     */
+    @Test
+    fun `closing a dirty tab asks before discarding the edits`() = runBlocking {
+        val id = scaffoldProject("bench-close-dirty")
+        val viewModel = WorkbenchViewModel(container)
+        viewModel.awaitProject(id)
+
+        val path = viewModel.firstKotlinFile()
+        viewModel.openFile(path)
+        withTimeout(10_000) { viewModel.buffers.first { it.containsKey(path) } }
+        viewModel.edit(path, viewModel.buffers.value.getValue(path).content + "\n")
+        withTimeout(10_000) { viewModel.state.first { it.activeTab?.dirty == true } }
+
+        viewModel.closeTab(path)
+        assertEquals("the close must be held pending", path, viewModel.pendingClose.value)
+        assertTrue("the tab must still be open", viewModel.buffers.value.containsKey(path))
+
+        viewModel.cancelPendingClose()
+        assertNull("keeping the edits clears the prompt", viewModel.pendingClose.value)
+        assertTrue("the tab must survive a cancelled close", viewModel.buffers.value.containsKey(path))
+
+        viewModel.closeTab(path)
+        assertEquals(path, viewModel.pendingClose.value)
+        viewModel.discardAndCloseTab()
+        assertFalse("the confirmed close drops the buffer", viewModel.buffers.value.containsKey(path))
+    }
+
+    /** A clean tab holds nothing that is not already on disk, so it closes without a prompt. */
+    @Test
+    fun `closing a clean tab does not ask`() = runBlocking {
+        val id = scaffoldProject("bench-close-clean")
+        val viewModel = WorkbenchViewModel(container)
+        viewModel.awaitProject(id)
+
+        val path = viewModel.firstKotlinFile()
+        viewModel.openFile(path)
+        withTimeout(10_000) { viewModel.buffers.first { it.containsKey(path) } }
+
+        viewModel.closeTab(path)
+        assertNull("a clean close must not prompt", viewModel.pendingClose.value)
+        assertFalse(viewModel.buffers.value.containsKey(path))
+    }
+
+    /**
      * The diagnostics panel follows the active tab. It used to be a single list that only an
      * analysis pass could replace, so switching to a file that was not re-analysed showed the
      * previous file's errors under the new file's name.

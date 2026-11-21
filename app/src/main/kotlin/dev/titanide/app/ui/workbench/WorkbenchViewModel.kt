@@ -151,6 +151,10 @@ class WorkbenchViewModel(
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
+    /** A tab whose close was interrupted because it has unsaved edits. */
+    private val _pendingClose = MutableStateFlow<String?>(null)
+    val pendingClose: StateFlow<String?> = _pendingClose.asStateFlow()
+
     private val _installInProgress = MutableStateFlow(false)
     val installInProgress: StateFlow<Boolean> = _installInProgress.asStateFlow()
 
@@ -310,6 +314,27 @@ class WorkbenchViewModel(
     }
 
     fun closeTab(tabId: String) {
+        // Closing drops the buffer, so unsaved edits would go with it and nothing else holds
+        // them. Ask first; discardAndCloseTab is the confirmed path.
+        if (hasUnsavedChanges(tabId)) {
+            _pendingClose.value = tabId
+            return
+        }
+        closeTabNow(tabId)
+    }
+
+    /** Closes a tab whose unsaved edits the user agreed to discard. */
+    fun discardAndCloseTab() {
+        val tabId = _pendingClose.value ?: return
+        _pendingClose.value = null
+        closeTabNow(tabId)
+    }
+
+    fun cancelPendingClose() {
+        _pendingClose.value = null
+    }
+
+    private fun closeTabNow(tabId: String) {
         _state.value = _state.value.closeTab(tabId)
         _buffers.value = _buffers.value - tabId
         diagnosticsByPath.remove(tabId)

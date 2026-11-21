@@ -86,6 +86,7 @@ fun WorkbenchScreen(
     val appearance by viewModel.appearance.collectAsStateWithLifecycle()
     val revealToken by viewModel.revealRequests.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
+    val pendingClose by viewModel.pendingClose.collectAsStateWithLifecycle()
     val build by viewModel.build.collectAsStateWithLifecycle()
     val logs by viewModel.buildLogs.collectAsStateWithLifecycle()
     val agent by viewModel.agent.collectAsStateWithLifecycle()
@@ -381,6 +382,31 @@ fun WorkbenchScreen(
                     is NamePrompt.Rename -> viewModel.renamePath(current.path, value)
                     is NamePrompt.Duplicate -> viewModel.duplicatePath(current.path, value)
                     is NamePrompt.Delete -> viewModel.deleteFile(current.path)
+                }
+            },
+        )
+    }
+
+    pendingClose?.let { path ->
+        val name = path.substringAfterLast('/')
+        AlertDialog(
+            onDismissRequest = viewModel::cancelPendingClose,
+            title = { Text("Close $name?", style = MaterialTheme.typography.titleMedium) },
+            text = {
+                Text(
+                    text = "This file has edits that are not on disk. Closing the tab discards them.",
+                    color = TitanColors.TextMuted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::discardAndCloseTab) {
+                    Text("Discard", color = TitanColors.Error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelPendingClose) {
+                    Text("Keep editing", color = TitanColors.Primary)
                 }
             },
         )

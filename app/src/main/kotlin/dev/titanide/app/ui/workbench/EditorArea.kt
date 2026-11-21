@@ -180,20 +180,22 @@ private fun TabStrip(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.width(132.dp),
                 )
-                if (tab.dirty) {
-                    Box(
-                        modifier = Modifier
-                            .padding(horizontal = 4.dp)
-                            .size(6.dp)
-                            .background(TitanColors.Primary, androidx.compose.foundation.shape.CircleShape),
-                    )
-                } else {
-                    DenseIconButton(
-                        icon = Icons.Filled.Close,
-                        contentDescription = "Close ${tab.title}",
-                        onClick = { onClose(tab.id) },
-                    )
-                }
+                // The dirty marker sits beside the close button, never instead of it: a tab
+                // with unsaved edits still has to be closable.
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 4.dp)
+                        .size(6.dp)
+                        .background(
+                            if (tab.dirty) TitanColors.Primary else Color.Transparent,
+                            androidx.compose.foundation.shape.CircleShape,
+                        ),
+                )
+                DenseIconButton(
+                    icon = Icons.Filled.Close,
+                    contentDescription = "Close ${tab.title}",
+                    onClick = { onClose(tab.id) },
+                )
             }
             Box(
                 modifier = Modifier
