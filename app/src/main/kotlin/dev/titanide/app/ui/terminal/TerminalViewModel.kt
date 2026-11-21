@@ -47,6 +47,9 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
 
     private val jobs = HashMap<String, Job>()
 
+    /** Session ids key [jobs] and the process runner, so they must never repeat. */
+    private val sessionCounter = java.util.concurrent.atomic.AtomicInteger()
+
     init {
         viewModelScope.launch {
             val (available, version) = container.processRunner.probe(
@@ -70,7 +73,7 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
     }
 
     fun newSession() {
-        val id = "term-${System.currentTimeMillis()}"
+        val id = "term-${sessionCounter.incrementAndGet()}"
         val cwd = container.storage.projectsRoot.absolutePath
         val session = TerminalSessionState(
             id = id,
