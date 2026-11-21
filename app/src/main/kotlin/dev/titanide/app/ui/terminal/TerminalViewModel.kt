@@ -111,6 +111,13 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
         _state.value = _state.value.copy(historyCursor = cursor)
     }
 
+    /** Called when the user types, so history browsing restarts from the newest entry. */
+    fun resetHistoryCursor() {
+        if (_state.value.historyCursor != -1) {
+            _state.value = _state.value.copy(historyCursor = -1)
+        }
+    }
+
     fun historyEntry(): String? {
         val cursor = _state.value.historyCursor
         return _state.value.history.getOrNull(cursor)
@@ -123,6 +130,20 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
         val session = _state.value.active ?: return
         if (session.running) {
             appendLine("A command is still running. Wait or press Stop.", isError = true)
+            return
+        }
+
+        // `cd` has to be handled here. Every command is a separate `sh -c` process, so a cd
+        // run inside one would move that process and vanish with it; the next command would
+        // silently start in the old directory. The session's cwd is what actually persists.
+        if (trimmed == "cd" || trimmed.startsWith("cd ") || trimmed.startsWith("cd\t")) {
+            appendLine("$ ${session.cwd} $ $trimmed", isCommand = true)
+            _state.value = _state.value.copy(
+                history = listOf(trimmed) + _state.value.history,
+                historyCursor = -1,
+            )
+            val target = trimmed.removePrefix("cd").trim().trim('"', '\'')
+            changeDirectory(target.ifEmpty { "~" })
             return
         }
 
@@ -187,7 +208,13 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
 
     fun changeDirectory(path: String) {
         val session = _state.value.active ?: return
-        val target: File = if (path.startsWith("/")) File(path) else File(session.cwd, path)
+        val home = container.storage.projectsRoot.absolutePath
+        val expanded = when {
+            path == "~" -> home
+            path.startsWith("~/") -> home + path.removePrefix("~")
+            else -> path
+        }
+        val target: File = if (expanded.startsWith("/")) File(expanded) else File(session.cwd, expanded)
         val canonical: File = try {
             target.canonicalFile
         } catch (error: java.io.IOException) {

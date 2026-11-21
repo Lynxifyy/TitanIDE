@@ -20,6 +20,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
@@ -177,8 +182,30 @@ fun TerminalScreen() {
                     Spacer(Modifier.width(8.dp))
                     BasicTextField(
                         value = input,
-                        onValueChange = { input = it },
-                        modifier = Modifier.weight(1f),
+                        onValueChange = {
+                            input = it
+                            // Typing leaves history browsing, otherwise the next arrow press
+                            // would overwrite what the user just typed.
+                            viewModel.resetHistoryCursor()
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .onPreviewKeyEvent { event ->
+                                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                when (event.key) {
+                                    Key.DirectionUp -> {
+                                        viewModel.previousHistory()
+                                        viewModel.historyEntry()?.let { input = it }
+                                        true
+                                    }
+                                    Key.DirectionDown -> {
+                                        viewModel.nextHistory()
+                                        input = viewModel.historyEntry().orEmpty()
+                                        true
+                                    }
+                                    else -> false
+                                }
+                            },
                         textStyle = TextStyle(
                             fontFamily = FontFamily.Monospace,
                             fontSize = 13.sp,
