@@ -428,6 +428,33 @@ class WorkbenchViewModelTest {
     }
 
     /**
+     * Deleting the file whose problems are on screen has to clear them. The Problems panel used to
+     * keep listing errors from a file that no longer exists, and they could not be opened or fixed.
+     */
+    @Test
+    fun `deleting the active file clears its diagnostics`() = runBlocking {
+        val id = scaffoldProject("bench-delete-diagnostics")
+        val viewModel = WorkbenchViewModel(container)
+        viewModel.awaitProject(id)
+
+        val path = "src/Doomed.kt"
+        viewModel.createFile(path)
+        withTimeout(10_000) { viewModel.buffers.first { it.containsKey(path) } }
+        viewModel.edit(path, "fun broken( {\n")
+        withTimeout(10_000) { viewModel.diagnostics.first { it.isNotEmpty() } }
+
+        viewModel.deleteFile(path)
+        withTimeout(10_000) { viewModel.message.first { it.orEmpty().let { m -> m.contains("Deleted") || m.contains("failed") } } }
+        withTimeout(10_000) { viewModel.state.first { it.activeTab?.path != path } }
+
+        assertEquals(
+            "problems from a deleted file must not stay on screen",
+            emptyList<Any>(),
+            viewModel.diagnostics.value,
+        )
+    }
+
+    /**
      * Undo history belongs to the file it was recorded against. A single shared stack means undo
      * in a second file applies the first file's edit offsets to the second file's text, which
      * rewrites text the user never touched in that file.

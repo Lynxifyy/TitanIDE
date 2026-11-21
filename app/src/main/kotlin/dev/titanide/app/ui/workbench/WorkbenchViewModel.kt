@@ -340,13 +340,19 @@ class WorkbenchViewModel(
 
     private fun closeTabNow(tabId: String) {
         _state.value = _state.value.closeTab(tabId)
-        _buffers.value = _buffers.value - tabId
-        diagnosticsByPath.remove(tabId)
-        undoStacks.remove(tabId)
-        debounceJobs.remove("analyze:$tabId")?.cancel()
-        debounceJobs.remove("save:$tabId")?.cancel()
-        analyzeJobs.remove(tabId)?.cancel()
-        _state.value.activeTab?.path?.let(::publishActive)
+        forgetPath(tabId)
+        publishActiveState()
+        refreshFind(previousContent = null, caret = _buffers.value[_state.value.activeTab?.path]?.caret ?: 0)
+    }
+
+    /** Drops every piece of state keyed by [path]; a path with no buffer must leave no trace. */
+    private fun forgetPath(path: String) {
+        _buffers.value = _buffers.value - path
+        diagnosticsByPath.remove(path)
+        undoStacks.remove(path)
+        debounceJobs.remove("analyze:$path")?.cancel()
+        debounceJobs.remove("save:$path")?.cancel()
+        analyzeJobs.remove(path)?.cancel()
     }
 
     fun activateTab(tabId: String) {
@@ -378,6 +384,17 @@ class WorkbenchViewModel(
             else -> matches.indexOfFirst { it.first >= caret }.coerceAtLeast(0)
         }
         _find.value = state.copy(matches = matches, activeIndex = index)
+    }
+
+    /** Republish for whatever is active now, clearing the panel when nothing is. */
+    private fun publishActiveState() {
+        val path = _state.value.activeTab?.path
+        if (path == null) {
+            _diagnostics.value = emptyList()
+            _state.update { it.copy(status = it.status.copy(errorCount = 0, warningCount = 0)) }
+            return
+        }
+        publishActive(path)
     }
 
     private fun publishActive(path: String) {
@@ -963,11 +980,16 @@ class WorkbenchViewModel(
         viewModelScope.launch {
             when (val result = container.fileTreeRepository.delete(project, path)) {
                 is SafeFileSystem.Result.Ok -> {
-                    // A directory delete takes its children with it, so their buffers go too.
+                    // A directory delete takes its children with it, so their state goes too.
                     val doomed = _buffers.value.keys.filter { it == path || it.startsWith("$path/") }
-                    _buffers.value = _buffers.value - doomed.toSet()
                     doomed.forEach { _state.value = _state.value.closeTab(it) }
+                    // Forget the deleted paths themselves, not only the ones that had a buffer,
+                    // or cached diagnostics outlive the file they describe.
+                    val stale = diagnosticsByPath.keys + undoStacks.keys + doomed
+                    stale.filter { it == path || it.startsWith("$path/") }.forEach(::forgetPath)
                     refreshFiles()
+                    publishActiveState()
+                    refreshFind(previousContent = null, caret = 0)
                     _message.value = "Deleted $path"
                 }
 
