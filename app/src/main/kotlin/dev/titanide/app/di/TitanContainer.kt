@@ -4,6 +4,8 @@ import android.content.Context
 import android.util.Log
 import androidx.room.Room
 import dev.titanide.app.BuildConfig
+import dev.titanide.app.extensions.CapabilityGate
+import dev.titanide.app.extensions.TitanCapability
 import dev.titanide.core.ai.AiProvider
 import dev.titanide.core.ai.EditApplier
 import dev.titanide.core.ai.TitanIntelligence
@@ -92,6 +94,28 @@ class TitanContainer(private val context: Context) {
     val fileTreeRepository: FileTreeRepository by lazy { FileTreeRepository(safeFileSystem) }
     val buildHistory: BuildHistoryRepository by lazy { BuildHistoryRepository(database.buildDao(), storage) }
     val tabRepository: TabRepository by lazy { TabRepository(database.tabDao()) }
+
+    /**
+     * Which built-in extensions are switched on. Enabled state is persisted by the extensions
+     * screen; an extension with no stored row counts as enabled so a fresh install keeps every
+     * feature. Consumers ask this before using a gated feature.
+     */
+    val capabilityGate: CapabilityGate = CapabilityGate { capability ->
+        capabilityStates.value[capability] ?: true
+    }
+
+    private val capabilityStates = MutableStateFlow<Map<TitanCapability, Boolean>>(emptyMap())
+
+    private fun observeCapabilities() {
+        appScope.launch {
+            database.extensionDao().observeAll().collect { stored ->
+                val byId = stored.associateBy { it.id }
+                capabilityStates.value = TitanCapability.entries.associateWith { capability ->
+                    byId[capability.extensionId]?.enabled ?: true
+                }
+            }
+        }
+    }
 
     val processRunner: ProcessRunner by lazy { ProcessRunner(appScope) }
     val toolchainProbe: ToolchainProbe by lazy { ToolchainProbe(processRunner) }
@@ -211,6 +235,7 @@ class TitanContainer(private val context: Context) {
             restoreGitHubAuth()
             buildHistory.prune(settings.settings.first().build.keepLogsDays)
         }
+        observeCapabilities()
     }
 
     /** Rebuilds the AI provider from settings; called after the user edits AI settings. */

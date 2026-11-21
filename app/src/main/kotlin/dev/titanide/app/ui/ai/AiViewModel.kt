@@ -3,6 +3,7 @@ package dev.titanide.app.ui.ai
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.extensions.TitanCapability
 import dev.titanide.core.ai.AiMode
 import dev.titanide.core.ai.AiOutcome
 import dev.titanide.core.ai.ChatMessage
@@ -113,6 +114,12 @@ class AiViewModel(private val container: TitanContainer) : ViewModel() {
         val project = _state.value.project
         val input = _state.value.input.trim()
         if (project == null || input.isEmpty() || _state.value.busy) return
+        if (!container.capabilityGate.isEnabled(TitanCapability.AI)) {
+            _state.value = _state.value.copy(
+                message = "${TitanCapability.AI.label} is switched off in Extensions",
+            )
+            return
+        }
 
         val mode = _state.value.mode
         val history = _state.value.conversation + ChatEntry(ChatMessage.Role.USER, input)

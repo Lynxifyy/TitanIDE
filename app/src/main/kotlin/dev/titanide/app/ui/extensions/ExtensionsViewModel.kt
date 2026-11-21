@@ -3,6 +3,7 @@ package dev.titanide.app.ui.extensions
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.extensions.TitanCapability
 import dev.titanide.core.data.db.ExtensionEntity
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,7 +26,11 @@ data class BuiltInExtension(
     val kind: String,
     val capabilities: List<String>,
     val alwaysOn: Boolean = false,
-)
+) {
+    /** What the toggle changes, so the switch never reads as decoration. */
+    val effect: String
+        get() = TitanCapability.forExtension(id).joinToString(" and ") { it.label }.ifEmpty { description }
+}
 
 data class ExtensionsUiState(
     val catalogue: List<BuiltInExtension> = BUILT_INS,

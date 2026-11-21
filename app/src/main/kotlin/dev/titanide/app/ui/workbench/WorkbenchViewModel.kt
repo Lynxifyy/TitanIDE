@@ -3,6 +3,7 @@ package dev.titanide.app.ui.workbench
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.extensions.TitanCapability
 import dev.titanide.core.data.files.SafeFileSystem
 import dev.titanide.core.editor.codeguard.CodeGuard
 import dev.titanide.core.engine.InstallOutcome
@@ -448,9 +449,22 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
     fun runBuild(kind: BuildKind) {
         val project = _project.value ?: return
         if (container.buildEngine.isRunning(project.id)) return
-        val target = container.currentSettings()?.build?.defaultTargetId
+        val configured = container.currentSettings()?.build?.defaultTargetId
             ?.let { id -> ExecutionTarget.entries.firstOrNull { it.id == id } }
             ?: ExecutionTarget.LOCAL
+        // A remote target is only usable while the remote backend extension is on; otherwise
+        // the build would dispatch to a backend the user switched off.
+        val target = if (configured == ExecutionTarget.LOCAL ||
+            container.capabilityGate.isEnabled(TitanCapability.REMOTE_BUILD)
+        ) {
+            configured
+        } else {
+            ExecutionTarget.LOCAL
+        }
+        if (target != configured) {
+            _message.value =
+                "Remote builds are switched off in Extensions, so this build runs on the device."
+        }
         _state.value = _state.value.showBottom(BottomTool.BUILD)
         container.buildEngine.start(
             BuildRequest(

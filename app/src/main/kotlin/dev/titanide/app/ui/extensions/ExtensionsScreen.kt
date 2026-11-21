@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.titanide.app.LocalContainer
+import dev.titanide.app.extensions.TitanCapability
 import dev.titanide.app.ui.common.TitanTopBar
 import dev.titanide.core.designsystem.TitanColors
 import dev.titanide.core.designsystem.components.MonogramBadge
@@ -124,6 +125,14 @@ private fun ExtensionCard(
                     style = MaterialTheme.typography.labelSmall,
                     color = TitanColors.Warning,
                 )
+                if (!extension.alwaysOn) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        if (enabled) "On: ${extension.effect}" else "Off: ${extension.effect}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (enabled) TitanColors.Success else TitanColors.TextMuted,
+                    )
+                }
             }
             Spacer(Modifier.width(8.dp))
             Switch(
