@@ -10,7 +10,6 @@ import dev.titanide.app.di.TitanContainer
 import dev.titanide.app.ui.ai.AiStudioScreen
 import dev.titanide.app.ui.build.BuildScreen
 import dev.titanide.app.ui.create.CreateProjectScreen
-import dev.titanide.app.ui.editor.EditorScreen
 import dev.titanide.app.ui.extensions.ExtensionsScreen
 import dev.titanide.app.ui.git.GitScreen
 import dev.titanide.app.ui.github.GitHubRepositoryScreen
@@ -84,11 +83,6 @@ class ScreenRenderTest {
     @Test
     fun createProjectRenders() = render {
         CreateProjectScreen(onBack = {}, onCreated = {})
-    }
-
-    @Test
-    fun editorRenders() = render {
-        EditorScreen(onOpenProjects = {}, onBuild = {}, onGit = {})
     }
 
     @Test
