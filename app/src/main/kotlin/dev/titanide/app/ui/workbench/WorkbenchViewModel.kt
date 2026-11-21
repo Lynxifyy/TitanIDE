@@ -71,6 +71,7 @@ data class EditorAppearance(
     val wordWrap: Boolean = false,
     val showLineNumbers: Boolean = true,
     val fontFamily: String = "monospace",
+    val highlightCurrentLine: Boolean = true,
 )
 
 /**
@@ -166,6 +167,7 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
                     lineHeightSp = settings.editor.lineHeight.coerceIn(12, 48),
                     wordWrap = settings.editor.wordWrap,
                     showLineNumbers = settings.editor.showLineNumbers,
+                    highlightCurrentLine = settings.editor.highlightCurrentLine,
                 )
             }
         }

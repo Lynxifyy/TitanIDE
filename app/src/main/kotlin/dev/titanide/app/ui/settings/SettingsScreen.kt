@@ -552,6 +552,25 @@ fun SettingsScreen() {
                             onCheckedChange = viewModel::setShowLineNumbers,
                         )
                     }
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "Highlight current line",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TitanColors.TextPrimary,
+                            )
+                            Text(
+                                "Tint the caret's line",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TitanColors.TextMuted,
+                            )
+                        }
+                        Switch(
+                            checked = settings?.editor?.highlightCurrentLine ?: true,
+                            onCheckedChange = viewModel::setHighlightCurrentLine,
+                        )
+                    }
                 }
             }
 

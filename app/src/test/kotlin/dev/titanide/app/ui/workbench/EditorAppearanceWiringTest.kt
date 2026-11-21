@@ -82,4 +82,24 @@ class EditorAppearanceWiringTest {
         assertEquals("a corrupt value must not make the editor unreadable", 32, appearance.fontSizeSp)
         assertEquals(12, appearance.lineHeightSp)
     }
+
+    /**
+     * The setting existed and did nothing, so the editor never drew the tint. This asserts the
+     * value reaches the appearance the editor renders from, in both directions.
+     */
+    @Test
+    fun `current line highlighting follows the setting`() = runBlocking {
+        runBlocking { container.settings.updateEditor { it.copy(highlightCurrentLine = false) } }
+        val viewModel = viewModel()
+        val off = withTimeout(10_000) {
+            viewModel.appearance.first { !it.highlightCurrentLine }
+        }
+        assertFalse("turning it off must reach the editor", off.highlightCurrentLine)
+
+        runBlocking { container.settings.updateEditor { it.copy(highlightCurrentLine = true) } }
+        val on = withTimeout(10_000) {
+            viewModel.appearance.first { it.highlightCurrentLine }
+        }
+        assertTrue("turning it on must reach the editor", on.highlightCurrentLine)
+    }
 }

@@ -376,6 +376,10 @@ class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
         viewModelScope.launch { container.settings.updateEditor { it.copy(codeGuardEnabled = enabled) } }
     }
 
+    fun setHighlightCurrentLine(enabled: Boolean) {
+        viewModelScope.launch { container.settings.updateEditor { it.copy(highlightCurrentLine = enabled) } }
+    }
+
     fun setAutoSave(enabled: Boolean) {
         viewModelScope.launch { container.settings.updateEditor { it.copy(autoSave = enabled) } }
     }

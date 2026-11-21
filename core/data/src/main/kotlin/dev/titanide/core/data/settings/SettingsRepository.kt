@@ -24,9 +24,7 @@ data class EditorSettings(
     val autoSave: Boolean = true,
     val autoSaveDelayMs: Long = 1500,
     val codeGuardEnabled: Boolean = true,
-    val showMinimap: Boolean = false,
     val highlightCurrentLine: Boolean = true,
-    val fontFamily: String = "monospace",
 )
 
 data class AiSettings(
@@ -36,7 +34,6 @@ data class AiSettings(
     val temperature: Double = 0.2,
     val maxTokens: Int = 4096,
     val allowProjectContext: Boolean = false,
-    val hasApiKey: Boolean = false,
 )
 
 /**
@@ -61,7 +58,6 @@ data class BuildSettings(
 
 data class TerminalSettings(
     val fontSize: Int = 13,
-    val shellPath: String = "",
     val maxSessions: Int = 4,
 )
 
@@ -72,7 +68,6 @@ data class TitanSettings(
     val terminal: TerminalSettings = TerminalSettings(),
     val openCode: OpenCodeSettings = OpenCodeSettings(),
     val onboarded: Boolean = false,
-    val themeId: String = "titan-dark",
 )
 
 /** Typed, reactive app settings. Every write is atomic through DataStore. */
@@ -87,7 +82,7 @@ class SettingsRepository(private val context: Context) {
         val autoSave = booleanPreferencesKey("editor_auto_save")
         val autoSaveDelay = longPreferencesKey("editor_auto_save_delay")
         val codeGuard = booleanPreferencesKey("editor_code_guard")
-        val minimap = booleanPreferencesKey("editor_minimap")
+
         val currentLine = booleanPreferencesKey("editor_current_line")
 
         val aiProvider = stringPreferencesKey("ai_provider")
@@ -109,11 +104,9 @@ class SettingsRepository(private val context: Context) {
         val ocAutoConnect = booleanPreferencesKey("opencode_auto_connect")
 
         val termFontSize = intPreferencesKey("terminal_font_size")
-        val termShell = stringPreferencesKey("terminal_shell")
         val termMaxSessions = intPreferencesKey("terminal_max_sessions")
 
         val onboarded = booleanPreferencesKey("onboarded")
-        val theme = stringPreferencesKey("theme")
     }
 
     val settings: Flow<TitanSettings> = context.dataStore.data.map { prefs ->
@@ -127,7 +120,6 @@ class SettingsRepository(private val context: Context) {
                 autoSave = prefs[Keys.autoSave] ?: true,
                 autoSaveDelayMs = prefs[Keys.autoSaveDelay] ?: 1500,
                 codeGuardEnabled = prefs[Keys.codeGuard] ?: true,
-                showMinimap = prefs[Keys.minimap] ?: false,
                 highlightCurrentLine = prefs[Keys.currentLine] ?: true,
             ),
             ai = AiSettings(
@@ -148,7 +140,6 @@ class SettingsRepository(private val context: Context) {
             ),
             terminal = TerminalSettings(
                 fontSize = prefs[Keys.termFontSize] ?: 13,
-                shellPath = prefs[Keys.termShell].orEmpty(),
                 maxSessions = prefs[Keys.termMaxSessions] ?: 4,
             ),
             openCode = OpenCodeSettings(
@@ -157,7 +148,6 @@ class SettingsRepository(private val context: Context) {
                 autoConnect = prefs[Keys.ocAutoConnect] ?: false,
             ),
             onboarded = prefs[Keys.onboarded] ?: false,
-            themeId = prefs[Keys.theme] ?: "titan-dark",
         )
     }
 
@@ -173,7 +163,6 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.autoSave] = next.autoSave
             prefs[Keys.autoSaveDelay] = next.autoSaveDelayMs.coerceIn(300, 10_000)
             prefs[Keys.codeGuard] = next.codeGuardEnabled
-            prefs[Keys.minimap] = next.showMinimap
             prefs[Keys.currentLine] = next.highlightCurrentLine
         }
     }
@@ -215,17 +204,12 @@ class SettingsRepository(private val context: Context) {
         val next = block(settingsSnapshot().terminal)
         context.dataStore.edit { prefs ->
             prefs[Keys.termFontSize] = next.fontSize
-            prefs[Keys.termShell] = next.shellPath
             prefs[Keys.termMaxSessions] = next.maxSessions
         }
     }
 
     suspend fun setOnboarded(value: Boolean) {
         context.dataStore.edit { it[Keys.onboarded] = value }
-    }
-
-    suspend fun setTheme(themeId: String) {
-        context.dataStore.edit { it[Keys.theme] = themeId }
     }
 
     private suspend fun settingsSnapshot(): TitanSettings = settings.first()

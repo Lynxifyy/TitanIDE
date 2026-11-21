@@ -37,6 +37,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -245,6 +248,7 @@ private fun CodeSurface(
 ) {
     val fontSize = appearance.fontSizeSp
     val lineHeight = appearance.lineHeightSp
+    val currentLineTint = TitanColors.Primary.copy(alpha = 0.06f)
     val annotated = remember(buffer.content, buffer.language) {
         SyntaxHighlighting.highlight(buffer.content, buffer.language)
     }
@@ -255,6 +259,9 @@ private fun CodeSurface(
         diagnostics.filter { it.severity == Severity.WARNING }.mapNotNull { it.line }.toSet()
     }
     val lineCount = buffer.lineCount
+    val caretLine = remember(buffer.caret, buffer.content) {
+        buffer.content.take(buffer.caret.coerceIn(0, buffer.content.length)).count { it == '\n' }
+    }
     val vertical = rememberScrollState()
     val horizontal = rememberScrollState()
 
@@ -356,6 +363,17 @@ private fun CodeSurface(
                 .fillMaxHeight()
                 .then(if (appearance.wordWrap) Modifier else Modifier.horizontalScroll(horizontal))
                 .verticalScroll(vertical)
+                .drawBehind {
+                    if (!appearance.highlightCurrentLine) return@drawBehind
+                    // Drawn in content space, inside the scroll modifier, so it moves with
+                    // the text instead of sitting at a fixed height on screen.
+                    val top = 6.dp.toPx() + caretLine * lineHeight.dp.toPx()
+                    drawRect(
+                        color = currentLineTint,
+                        topLeft = Offset(0f, top),
+                        size = Size(size.width, lineHeight.dp.toPx()),
+                    )
+                }
                 .padding(start = 8.dp, top = 6.dp, end = 8.dp, bottom = 8.dp),
         )
     }
