@@ -131,6 +131,7 @@ fun AiStudioScreen(onOpenSettings: () -> Unit) {
         if (state.mode == AiMode.AGENT) {
             AgentPanel(state, viewModel)
         } else {
+            QuickActions(state, viewModel)
             Box(Modifier.weight(1f)) {
                 if (state.conversation.isEmpty()) {
                     EmptyState(
@@ -291,6 +292,34 @@ private fun PendingEditsCard(state: AiUiState, viewModel: AiViewModel) {
                 }
             }
         }
+    }
+}
+
+/**
+ * The tasks a developer asks for constantly, one tap each. They existed in the core but had
+ * no way to be reached, which made three advertised capabilities dead code.
+ */
+@Composable
+private fun QuickActions(state: AiUiState, viewModel: AiViewModel) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        OutlinedButton(
+            onClick = viewModel::generateTestsForActiveFile,
+            enabled = !state.busy,
+        ) { Text("Generate tests", style = MaterialTheme.typography.labelSmall) }
+        OutlinedButton(
+            onClick = viewModel::auditActiveFile,
+            enabled = !state.busy,
+        ) { Text("Security audit", style = MaterialTheme.typography.labelSmall) }
+        OutlinedButton(
+            onClick = viewModel::runTests,
+            enabled = !state.busy,
+        ) { Text("Run tests", style = MaterialTheme.typography.labelSmall) }
     }
 }
 

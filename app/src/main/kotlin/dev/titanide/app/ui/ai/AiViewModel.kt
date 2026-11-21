@@ -309,6 +309,68 @@ class AiViewModel(private val container: TitanContainer) : ViewModel() {
         }
     }
 
+    /** Generates tests for the active file. */
+    fun generateTestsForActiveFile() {
+        runOnActiveFile("Generate tests") { project, code, language, path ->
+            container.intelligence.generateTests(project, code, language, path)
+        }
+    }
+
+    /** Audits the active file for security problems. */
+    fun auditActiveFile() {
+        runOnActiveFile("Security audit") { project, code, language, _ ->
+            container.intelligence.securityAudit(project, code, language)
+        }
+    }
+
+    /**
+     * Runs [action] on the active file's selection, or the whole file when nothing is selected,
+     * and reports the outcome in the conversation. Without a file there is nothing to send, so
+     * the reason is stated rather than a request being made with an empty document.
+     */
+    private fun runOnActiveFile(
+        label: String,
+        action: suspend (Project, String, String?, String?) -> AiOutcome,
+    ) {
+        val project = _state.value.project ?: return
+        if (_state.value.busy) return
+        val snapshot = container.activeFile.current.value
+        if (!snapshot.hasFile) {
+            _state.value = _state.value.copy(
+                message = "$label needs a file open in the editor",
+            )
+            return
+        }
+        val code = snapshot.selection ?: snapshot.content
+        if (code.isBlank()) {
+            _state.value = _state.value.copy(message = "$label needs a non-empty file or selection")
+            return
+        }
+        val prompt = ChatEntry(ChatMessage.Role.USER, "$label: ${snapshot.path.orEmpty()}")
+        _state.value = _state.value.copy(
+            busy = true,
+            conversation = _state.value.conversation + prompt,
+            message = null,
+        )
+        viewModelScope.launch {
+            val outcome = action(project, code, snapshot.language, snapshot.path)
+            _state.value = _state.value.copy(
+                busy = false,
+                conversation = _state.value.conversation + outcomeToEntry(outcome),
+                pendingEdits = (outcome as? AiOutcome.Edits)?.edits ?: emptyList(),
+            )
+        }
+    }
+
+    private fun outcomeToEntry(outcome: AiOutcome): ChatEntry = when (outcome) {
+        is AiOutcome.Answer -> ChatEntry(ChatMessage.Role.ASSISTANT, outcome.text)
+        is AiOutcome.Edits -> ChatEntry(
+            ChatMessage.Role.ASSISTANT,
+            outcome.explanation.ifBlank { "Proposed ${outcome.edits.size} file change(s)." },
+        )
+        is AiOutcome.Failure -> ChatEntry(ChatMessage.Role.ASSISTANT, "Error: ${outcome.reason}")
+    }
+
     fun clearMessage() {
         _state.value = _state.value.copy(message = null)
     }
