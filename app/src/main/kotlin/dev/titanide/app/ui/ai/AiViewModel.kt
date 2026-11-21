@@ -9,10 +9,12 @@ import dev.titanide.core.ai.ChatMessage
 import dev.titanide.core.ai.ProposedEdit
 import dev.titanide.core.ai.agent.AgentEvent
 import dev.titanide.core.ai.agent.AgentState
+import dev.titanide.core.ai.agent.ToolPolicy
 import dev.titanide.core.model.BuildKind
 import dev.titanide.core.model.BuildRequest
 import dev.titanide.core.model.ExecutionTarget
 import dev.titanide.core.model.Project
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,6 +24,12 @@ data class ChatEntry(
     val role: ChatMessage.Role,
     val text: String,
     val timestamp: Long = System.currentTimeMillis(),
+)
+
+/** A tool call the agent is waiting on the user to allow. */
+data class PendingApproval(
+    val tool: String,
+    val args: String,
 )
 
 data class AiUiState(
@@ -35,6 +43,7 @@ data class AiUiState(
     val pendingEdits: List<ProposedEdit> = emptyList(),
     val pendingExplanation: String = "",
     val agent: AgentState? = null,
+    val pendingApproval: PendingApproval? = null,
     val canRevert: Boolean = false,
     val message: String? = null,
     val providerConfigured: Boolean = false,
@@ -196,16 +205,43 @@ class AiViewModel(private val container: TitanContainer) : ViewModel() {
             project = project,
             goal = goal,
             buildRunner = { request -> container.buildEngine.runAndWait(request) },
-            approveTool = { tool, _ ->
-                // Destructive tools require explicit confirmation from the UI; reads and
-                // builds are allowed so the agent can make progress unattended.
-                tool in setOf("list_files", "read_file", "search_code", "run_build", "run_tests")
-            },
+            approveTool = { tool, args -> awaitToolApproval(tool, args) },
         )
         _state.value = _state.value.copy(busy = false)
     }
 
+    /**
+     * Blocks the agent until the user answers.
+     *
+     * Reads and builds run unattended, which is what makes an autonomous mode worth having.
+     * A tool that changes the project waits instead: the point of watching the agent is lost
+     * if a wrong edit lands unseen, and the buffer reload below makes the change visible the
+     * moment it is allowed.
+     */
+    suspend fun awaitToolApproval(tool: String, args: kotlinx.serialization.json.JsonObject): Boolean {
+        if (!ToolPolicy.requiresApproval(tool)) return true
+        val answer = CompletableDeferred<Boolean>()
+        approval = answer
+        _state.value = _state.value.copy(pendingApproval = PendingApproval(tool, args.toString().take(400)))
+        return try {
+            answer.await()
+        } finally {
+            approval = null
+            _state.value = _state.value.copy(pendingApproval = null)
+        }
+    }
+
+    fun approvePendingTool() {
+        approval?.complete(true)
+    }
+
+    fun denyPendingTool() {
+        approval?.complete(false)
+    }
+
     fun stopAgent() {
+        // Release a blocked approval first, or the agent coroutine never returns.
+        approval?.complete(false)
         container.intelligence.cancelAgent()
     }
 
@@ -280,6 +316,8 @@ class AiViewModel(private val container: TitanContainer) : ViewModel() {
     fun newConversation() {
         _state.value = _state.value.copy(conversation = emptyList(), pendingEdits = emptyList())
     }
+
+    private var approval: CompletableDeferred<Boolean>? = null
 
     private fun activeFile(): Triple<String, String, String>? {
         val snapshot = container.activeFile.current.value

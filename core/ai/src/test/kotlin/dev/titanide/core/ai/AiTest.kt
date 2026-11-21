@@ -3,6 +3,7 @@ package dev.titanide.core.ai
 import dev.titanide.core.ai.agent.AgentEvent
 import dev.titanide.core.ai.agent.AgentRunner
 import dev.titanide.core.ai.agent.AgentToolbox
+import dev.titanide.core.ai.agent.ToolPolicy
 import dev.titanide.core.ai.agent.AgentTool
 import dev.titanide.core.ai.agent.ToolResult
 import dev.titanide.core.ai.providers.AnthropicProvider
@@ -11,12 +12,15 @@ import dev.titanide.core.ai.providers.UnconfiguredProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -432,5 +436,95 @@ class AgentRunnerTest {
         val blocked = steps.last()
         assertTrue(blocked is AgentEvent.Blocked)
         assertTrue((blocked as AgentEvent.Blocked).reason.contains("step limit"))
+    }
+}
+
+/**
+ * The approval gate is the only thing between an autonomous agent and the user's source
+ * tree, so the interesting question is not whether it can say no — it is whether saying yes
+ * actually lets the tool run, and whether the agent's loop really waits for the answer.
+ */
+class AgentApprovalGateTest {
+
+    private fun runner(
+        replies: List<String>,
+        tools: List<AgentTool>,
+        approve: suspend (String, JsonObject) -> Boolean,
+        maxSteps: Int = 6,
+    ): AgentRunner {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val provider = ScriptedProvider(replies)
+        return AgentRunner(scope, { provider }, "scripted", AgentToolbox(tools, approve), maxSteps)
+    }
+
+    private suspend fun awaitFinished(runner: AgentRunner, timeoutMs: Long = 5000): List<AgentEvent> {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (!runner.state.value.running) return runner.state.value.steps
+            kotlinx.coroutines.delay(20)
+        }
+        return runner.state.value.steps
+    }
+
+    @Test
+    fun `approving a write lets the tool change the project`() = runBlocking {
+        val write = FakeTool("write_file", "write", ToolResult(true, "wrote 1 file"))
+        val runner = runner(
+            listOf("TOOL: write_file\nARGS: {}", "DONE: edited"),
+            listOf(write),
+            approve = { _, _ -> true },
+        )
+        runner.start("edit the file", null)
+        awaitFinished(runner)
+        assertEquals("a yes must actually run the tool", 1, write.invocations)
+    }
+
+    @Test
+    fun `denying a write leaves the project untouched and tells the agent`() = runBlocking {
+        val write = FakeTool("write_file", "write", ToolResult(true, "wrote 1 file"))
+        val runner = runner(
+            listOf("TOOL: write_file\nARGS: {}", "DONE: stopped"),
+            listOf(write),
+            approve = { _, _ -> false },
+        )
+        runner.start("edit the file", null)
+        val steps = awaitFinished(runner)
+        assertEquals("a no must not run the tool", 0, write.invocations)
+        val observation = steps.filterIsInstance<AgentEvent.Observation>().firstOrNull()
+        assertTrue("the agent must be told why: $steps", observation?.output?.contains("declined") == true)
+    }
+
+    @Test
+    fun `the loop waits for the answer instead of running ahead`() = runBlocking {
+        val write = FakeTool("write_file", "write", ToolResult(true, "wrote 1 file"))
+        val asked = CompletableDeferred<Unit>()
+        val answer = CompletableDeferred<Boolean>()
+        val runner = runner(
+            listOf("TOOL: write_file\nARGS: {}", "DONE: edited"),
+            listOf(write),
+            approve = { _, _ ->
+                asked.complete(Unit)
+                answer.await()
+            },
+        )
+        runner.start("edit the file", null)
+
+        withTimeout(2000) { asked.await() }
+        assertTrue("the agent must still be running while it waits", runner.state.value.running)
+        assertEquals("nothing may be written before the answer", 0, write.invocations)
+
+        answer.complete(true)
+        awaitFinished(runner)
+        assertEquals("the write happens once allowed", 1, write.invocations)
+    }
+
+    @Test
+    fun `reads and builds are unattended but writes are not`() {
+        listOf("list_files", "read_file", "search_code", "run_build", "run_tests").forEach {
+            assertFalse("$it cannot change the project", ToolPolicy.requiresApproval(it))
+        }
+        listOf("write_file", "delete_file").forEach {
+            assertTrue("$it changes the project", ToolPolicy.requiresApproval(it))
+        }
     }
 }

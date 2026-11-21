@@ -328,11 +328,56 @@ private fun androidx.compose.foundation.layout.ColumnScope.AgentPanel(state: AiU
         ) {
             items(agent.steps) { event -> AgentStepRow(event) }
         }
+        state.pendingApproval?.let { approval ->
+            ApprovalCard(approval, viewModel)
+        }
         if (agent.running) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 6.dp)) {
                 CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 2.dp, color = TitanColors.Secondary)
                 Spacer(Modifier.width(8.dp))
                 Text("Working... step ${agent.stepCount}", style = MaterialTheme.typography.labelSmall, color = TitanColors.TextMuted)
+            }
+        }
+    }
+}
+
+/**
+ * Shown while the agent is blocked on a tool that changes the project. The agent's loop is
+ * genuinely suspended here, so the two buttons are the difference between an edit being
+ * applied and the agent being told no.
+ */
+@Composable
+private fun ApprovalCard(approval: PendingApproval, viewModel: AiViewModel) {
+    Surface(
+        color = TitanColors.Warning.copy(alpha = 0.12f),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Text(
+                "Approve ${approval.tool}?",
+                style = MaterialTheme.typography.titleSmall,
+                color = TitanColors.TextPrimary,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "The agent is waiting. Nothing has been changed yet.",
+                style = MaterialTheme.typography.labelSmall,
+                color = TitanColors.TextMuted,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                approval.args,
+                style = MaterialTheme.typography.labelSmall,
+                color = TitanColors.TextMuted,
+                maxLines = 6,
+                overflow = TextOverflow.Ellipsis,
+                fontFamily = FontFamily.Monospace,
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = viewModel::approvePendingTool) { Text("Allow") }
+                OutlinedButton(onClick = viewModel::denyPendingTool) { Text("Deny") }
             }
         }
     }
