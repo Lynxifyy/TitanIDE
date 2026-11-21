@@ -397,6 +397,37 @@ class WorkbenchViewModelTest {
     }
 
     /**
+     * A rename moves the buffer to a new path. Undo history belongs to that buffer, so it has to
+     * move with it; otherwise every edit made before the rename becomes un-undoable, silently.
+     */
+    @Test
+    fun `renaming a file keeps its undo history`() = runBlocking {
+        val id = scaffoldProject("bench-rename-undo")
+        val viewModel = WorkbenchViewModel(container)
+        viewModel.awaitProject(id)
+
+        val path = viewModel.firstKotlinFile()
+        val renamed = path.replace(".kt", "Renamed.kt")
+        viewModel.openFile(path)
+        withTimeout(10_000) { viewModel.buffers.first { it.containsKey(path) } }
+        val original = viewModel.buffers.value.getValue(path).content
+        viewModel.edit(path, original + "\n// added\n")
+        withTimeout(10_000) { viewModel.buffers.first { it.getValue(path).content.endsWith("// added\n") } }
+
+        viewModel.renamePath(path, renamed)
+        withTimeout(10_000) { viewModel.buffers.first { it.containsKey(renamed) } }
+        withTimeout(10_000) { viewModel.state.first { it.activeTab?.path == renamed } }
+
+        viewModel.undo()
+        withTimeout(10_000) { viewModel.buffers.first { it.getValue(renamed).content == original } }
+        assertEquals(
+            "undo must still work after the file was renamed",
+            original,
+            viewModel.buffers.value.getValue(renamed).content,
+        )
+    }
+
+    /**
      * Undo history belongs to the file it was recorded against. A single shared stack means undo
      * in a second file applies the first file's edit offsets to the second file's text, which
      * rewrites text the user never touched in that file.

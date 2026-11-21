@@ -940,6 +940,11 @@ class WorkbenchViewModel(
         moved.forEach { (oldPath, buffer) ->
             val newPath = to + oldPath.removePrefix(from)
             _buffers.value = _buffers.value + (newPath to buffer.copy(path = newPath))
+            // History and pending work describe this buffer's text, so they move with it.
+            undoStacks.remove(oldPath)?.let { undoStacks[newPath] = it }
+            for (kind in listOf("analyze", "save")) {
+                debounceJobs.remove("$kind:$oldPath")?.let { debounceJobs["$kind:$newPath"] = it }
+            }
         }
         val active = _state.value.activeTab?.path
         if (active != null && (active == from || active.startsWith("$from/"))) {
@@ -949,6 +954,7 @@ class WorkbenchViewModel(
                 languageId = LanguageDetector.detect(newActive),
             )
             publishActive(newActive)
+            refreshFind(previousContent = null, caret = _buffers.value[newActive]?.caret ?: 0)
         }
     }
 
