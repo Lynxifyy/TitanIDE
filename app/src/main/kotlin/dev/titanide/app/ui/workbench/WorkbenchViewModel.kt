@@ -319,7 +319,7 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
         val document = TextDocument.of(buffer.content)
         val caret = buffer.caret.coerceIn(0, buffer.content.length)
         val line = document.lineOf(caret)
-        val transform = EditorEngine(buffer.language)
+        val transform = EditorEngine(buffer.language, indentUnit())
             .toggleLineComment(document, document.lineStart(line), document.lineEnd(line)) ?: return
         applyTransform(path, transform)
     }
@@ -327,7 +327,7 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
     fun formatDocument() {
         val path = _state.value.activeTab?.path ?: return
         val buffer = _buffers.value[path] ?: return
-        val transform = EditorEngine(buffer.language).formatDocument(TextDocument.of(buffer.content)) ?: return
+        val transform = EditorEngine(buffer.language, indentUnit()).formatDocument(TextDocument.of(buffer.content)) ?: return
         applyTransform(path, transform)
         _message.value = "Formatted ${path.substringAfterLast('/')}"
     }
@@ -338,7 +338,7 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
         val document = TextDocument.of(buffer.content)
         val caret = buffer.caret.coerceIn(0, buffer.content.length)
         val line = document.lineOf(caret)
-        val transform = EditorEngine(buffer.language)
+        val transform = EditorEngine(buffer.language, indentUnit())
             .indentSelection(document, document.lineStart(line), document.lineEnd(line), outdent)
         applyTransform(path, transform)
     }
@@ -432,6 +432,15 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
             }
             _searchHits.value = hits
         }
+    }
+
+    /**
+     * One indent level from the editor settings. Read at call time so a changed tab width
+     * takes effect on the next keystroke without restarting the editor.
+     */
+    private fun indentUnit(): String? {
+        val width = container.currentSettings()?.editor?.tabWidth ?: return null
+        return " ".repeat(width.coerceIn(2, 8))
     }
 
     // ---------------------------------------------------------------- build

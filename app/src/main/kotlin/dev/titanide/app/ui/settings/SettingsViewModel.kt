@@ -310,6 +310,33 @@ class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
         }
     }
 
+    fun setTabWidth(width: Int) {
+        viewModelScope.launch { container.settings.updateEditor { it.copy(tabWidth = width.coerceIn(2, 8)) } }
+    }
+
+    fun setWordWrap(enabled: Boolean) {
+        viewModelScope.launch { container.settings.updateEditor { it.copy(wordWrap = enabled) } }
+    }
+
+    fun setShowLineNumbers(enabled: Boolean) {
+        viewModelScope.launch { container.settings.updateEditor { it.copy(showLineNumbers = enabled) } }
+    }
+
+    /**
+     * Line height is set relative to the font, not in absolute sp: a fixed height would
+     * crowd the glyphs once the font size changes.
+     */
+    fun setEditorLineSpacing(percent: Int) {
+        viewModelScope.launch {
+            container.settings.updateEditor { editor ->
+                val clamped = percent.coerceIn(100, 200)
+                editor.copy(
+                    lineHeight = (editor.fontSize * clamped / 100).coerceAtLeast(editor.fontSize),
+                )
+            }
+        }
+    }
+
     fun setEditorFontSize(size: Int) {
         viewModelScope.launch { container.settings.updateEditor { it.copy(fontSize = size.coerceIn(9, 28)) } }
     }

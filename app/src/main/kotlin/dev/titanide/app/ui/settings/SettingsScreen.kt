@@ -49,6 +49,7 @@ import dev.titanide.app.LocalContainer
 import dev.titanide.app.ui.common.TitanTopBar
 import dev.titanide.app.ui.common.formatBytes
 import dev.titanide.core.designsystem.TitanColors
+import dev.titanide.core.data.settings.EditorSettings
 import dev.titanide.core.designsystem.components.StatusPill
 import dev.titanide.core.designsystem.components.TitanCard
 import dev.titanide.core.model.ExecutionTarget
@@ -491,6 +492,66 @@ fun SettingsScreen() {
                             )
                         }
                     }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Tab width: ${settings?.editor?.tabWidth ?: 4} spaces",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TitanColors.TextMuted,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(2, 4, 8).forEach { width ->
+                            FilterChip(
+                                selected = (settings?.editor?.tabWidth ?: 4) == width,
+                                onClick = { viewModel.setTabWidth(width) },
+                                label = { Text("$width", style = MaterialTheme.typography.labelSmall) },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Line spacing: ${lineSpacingPercent(settings?.editor)}%",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TitanColors.TextMuted,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(110, 130, 150).forEach { percent ->
+                            FilterChip(
+                                selected = lineSpacingPercent(settings?.editor) == percent,
+                                onClick = { viewModel.setEditorLineSpacing(percent) },
+                                label = { Text("$percent%", style = MaterialTheme.typography.labelSmall) },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Word wrap", style = MaterialTheme.typography.labelSmall, color = TitanColors.TextPrimary)
+                            Text(
+                                "Off scrolls long lines sideways",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TitanColors.TextMuted,
+                            )
+                        }
+                        Switch(
+                            checked = settings?.editor?.wordWrap ?: false,
+                            onCheckedChange = viewModel::setWordWrap,
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Line numbers", style = MaterialTheme.typography.labelSmall, color = TitanColors.TextPrimary)
+                            Text(
+                                "Show the gutter",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TitanColors.TextMuted,
+                            )
+                        }
+                        Switch(
+                            checked = settings?.editor?.showLineNumbers ?: true,
+                            onCheckedChange = viewModel::setShowLineNumbers,
+                        )
+                    }
                 }
             }
 
@@ -538,4 +599,13 @@ fun SettingsScreen() {
             Spacer(Modifier.height(24.dp))
         }
     }
+}
+
+/**
+ * The stored line height as a percentage of the font size, which is what the chips show.
+ * Derived rather than stored so it stays correct when the font size changes.
+ */
+private fun lineSpacingPercent(editor: EditorSettings?): Int {
+    if (editor == null || editor.fontSize <= 0) return 130
+    return (editor.lineHeight * 100 / editor.fontSize).coerceIn(100, 200)
 }

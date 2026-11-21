@@ -36,6 +36,16 @@ data class EditorTab(
 
 data class SearchHit(val path: String, val line: Int, val text: String)
 
+/** The subset of editor settings that affect how text is drawn. */
+data class EditorAppearance(
+    val fontSizeSp: Int = 13,
+    val lineHeightSp: Int = 20,
+    val tabWidth: Int = 4,
+    val wordWrap: Boolean = false,
+    val showLineNumbers: Boolean = true,
+    val fontFamily: String = "monospace",
+)
+
 data class EditorState(
     val project: Project? = null,
     val projects: List<Project> = emptyList(),
@@ -52,6 +62,11 @@ data class EditorState(
     val searching: Boolean = false,
     val message: String? = null,
     val autoSave: Boolean = true,
+    /**
+     * Editor appearance, mirrored from settings. Held in state rather than read inside the
+     * text field so a change recomposes only the editor and not the whole screen.
+     */
+    val appearance: EditorAppearance = EditorAppearance(),
 ) {
     val active: EditorTab? get() = tabs.getOrNull(activeIndex)
     val errorCount: Int get() = diagnostics.count { it.severity == dev.titanide.core.model.Severity.ERROR }
@@ -83,6 +98,12 @@ class EditorViewModel(private val container: TitanContainer) : ViewModel() {
     private val _state = MutableStateFlow(EditorState())
     val state: StateFlow<EditorState> = _state.asStateFlow()
 
+    /** One indent level, derived from the user's tab width setting. */
+    private fun indentUnit(): String? {
+        val width = _state.value.appearance.tabWidth
+        return " ".repeat(width.coerceIn(2, 8))
+    }
+
     private val codeGuard = CodeGuard()
     private var codeGuardEnabled = true
     private val searchEngine = SearchEngine()
@@ -94,9 +115,20 @@ class EditorViewModel(private val container: TitanContainer) : ViewModel() {
         viewModelScope.launch {
             container.settings.settings.collect { settings ->
                 codeGuardEnabled = settings.editor.codeGuardEnabled
-                if (!codeGuardEnabled) {
-                    _state.value = _state.value.copy(diagnostics = emptyList())
-                }
+                val appearance = EditorAppearance(
+                    // Clamped so a bad persisted value cannot make the editor unreadable.
+                    fontSizeSp = settings.editor.fontSize.coerceIn(8, 32),
+                    lineHeightSp = settings.editor.lineHeight.coerceIn(10, 48),
+                    tabWidth = settings.editor.tabWidth.coerceIn(2, 8),
+                    wordWrap = settings.editor.wordWrap,
+                    showLineNumbers = settings.editor.showLineNumbers,
+                    fontFamily = settings.editor.fontFamily,
+                )
+                _state.value = _state.value.copy(
+                    diagnostics = if (codeGuardEnabled) _state.value.diagnostics else emptyList(),
+                    autoSave = settings.editor.autoSave,
+                    appearance = appearance,
+                )
             }
         }
         viewModelScope.launch {
@@ -318,7 +350,7 @@ class EditorViewModel(private val container: TitanContainer) : ViewModel() {
         val state = _state.value
         val active = state.active ?: return
         val document = TextDocument.of(active.content)
-        val engine = EditorEngine(active.language)
+        val engine = EditorEngine(active.language, indentUnit())
         val caret = active.caret.coerceIn(0, active.content.length)
         val lineStart = document.lineStart(document.lineOf(caret))
         val lineEnd = document.lineEnd(document.lineOf(caret))
@@ -330,7 +362,7 @@ class EditorViewModel(private val container: TitanContainer) : ViewModel() {
         val state = _state.value
         val active = state.active ?: return
         val document = TextDocument.of(active.content)
-        val engine = EditorEngine(active.language)
+        val engine = EditorEngine(active.language, indentUnit())
         val caret = active.caret.coerceIn(0, active.content.length)
         val transform = engine.indentSelection(
             document,
@@ -344,7 +376,7 @@ class EditorViewModel(private val container: TitanContainer) : ViewModel() {
     fun formatDocument() {
         val state = _state.value
         val active = state.active ?: return
-        val engine = EditorEngine(active.language)
+        val engine = EditorEngine(active.language, indentUnit())
         val transform = engine.formatDocument(TextDocument.of(active.content)) ?: return
         applyTransform(transform)
         _state.value = _state.value.copy(message = "Formatted ${active.name}")

@@ -21,7 +21,16 @@ enum class CompletionKind { KEYWORD, FUNCTION, TYPE, PROPERTY, SNIPPET, FILE }
  * (tests, AI edits, project-wide formatting). All operations are pure: they take a
  * [TextDocument] and return the new document plus the caret offset to restore.
  */
-class EditorEngine(private val language: Language) {
+class EditorEngine(
+    private val language: Language,
+    /**
+     * One indent level. Defaults to the language convention, but the user's tab width
+     * overrides it: indenting by a width the user did not choose is a bug, not a preference.
+     */
+    indentUnit: String? = null,
+) {
+
+    private val indentStep = indentUnit ?: language.indentUnit
 
     data class Transform(val document: TextDocument, val caret: Int, val edit: EditRecord? = null)
 
@@ -77,7 +86,7 @@ class EditorEngine(private val language: Language) {
         if (before.isBlank() && before.isNotEmpty()) {
             val indent = document.indentOf(line)
             if (indent.isEmpty()) return null
-            val newIndent = indent.dropLast(language.indentUnit.length.coerceAtMost(indent.length))
+            val newIndent = indent.dropLast(indentStep.length.coerceAtMost(indent.length))
             val (doc, edit) = document.replace(lineStart until caret, newIndent)
             return Transform(doc, lineStart + newIndent.length, edit)
         }
@@ -98,7 +107,7 @@ class EditorEngine(private val language: Language) {
         val closesImmediately = afterCaret.startsWith("}") || afterCaret.startsWith(")") ||
             afterCaret.startsWith("]")
 
-        val deeper = indent + language.indentUnit
+        val deeper = indent + indentStep
         return when {
             opensBlock && closesImmediately -> {
                 val insertion = "\n$deeper\n$indent"
@@ -180,12 +189,12 @@ class EditorEngine(private val language: Language) {
             if (line.isBlank()) line
             else if (outdent) {
                 when {
-                    line.startsWith(language.indentUnit) -> line.removePrefix(language.indentUnit)
+                    line.startsWith(indentStep) -> line.removePrefix(indentStep)
                     line.startsWith(" ") -> line.drop(1)
                     line.startsWith("\t") -> line.drop(1)
                     else -> line
                 }
-            } else language.indentUnit + line
+            } else indentStep + line
         }
         val (doc, edit) = document.replace(start..(end - 1).coerceAtLeast(start), transformed)
         return Transform(doc, start + transformed.length, edit)
@@ -203,7 +212,7 @@ class EditorEngine(private val language: Language) {
             val trimmed = rawLine.trim()
             val leadingClosers = trimmed.takeWhile { it in closers }.length
             val lineDepth = (depth - leadingClosers).coerceAtLeast(0)
-            builder.append(language.indentUnit.repeat(lineDepth))
+            builder.append(indentStep.repeat(lineDepth))
             builder.append(trimmed)
             if (index != lines.lastIndex) builder.append('\n')
 

@@ -2,6 +2,8 @@ package dev.titanide.app.ui.editor
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -156,7 +158,7 @@ fun EditorScreen(
                             message = "Pick a file from the explorer to start editing.",
                         )
                     } else {
-                        CodeEditor(active, viewModel)
+                        CodeEditor(active, viewModel, state.appearance)
                     }
                 }
                 if (state.showDiagnostics) {
@@ -414,7 +416,11 @@ private fun SearchPanel(state: EditorState, viewModel: EditorViewModel) {
 }
 
 @Composable
-private fun CodeEditor(tab: EditorTab, viewModel: EditorViewModel) {
+private fun CodeEditor(
+    tab: EditorTab,
+    viewModel: EditorViewModel,
+    appearance: EditorAppearance,
+) {
     var showMenu by remember { mutableStateOf(false) }
     val lineNumbers = remember(tab.content) { tab.content.count { it == '\n' } + 1 }
     val highlighted = remember(tab.content, tab.language) {
@@ -477,50 +483,101 @@ private fun CodeEditor(tab: EditorTab, viewModel: EditorViewModel) {
         }
 
         Row(Modifier.fillMaxSize()) {
-            // Line numbers gutter.
-            Column(
-                modifier = Modifier
-                    .background(TitanColors.CanvasElevated)
-                    .fillMaxHeight()
-                    .width(40.dp)
-                    .padding(top = 8.dp),
-                horizontalAlignment = Alignment.End,
-            ) {
-                LazyColumn(state = rememberLazyListState()) {
-                    items(lineNumbers) { index ->
-                        Text(
-                            text = "${index + 1}",
-                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                            color = TitanColors.TextMuted.copy(alpha = 0.55f),
-                            modifier = Modifier.padding(end = 6.dp),
-                        )
+            if (appearance.showLineNumbers) {
+                Column(
+                    modifier = Modifier
+                        .background(TitanColors.CanvasElevated)
+                        .fillMaxHeight()
+                        .width(40.dp)
+                        .padding(top = 8.dp),
+                    horizontalAlignment = Alignment.End,
+                ) {
+                    LazyColumn(state = rememberLazyListState()) {
+                        items(lineNumbers) { index ->
+                            Text(
+                                text = "${index + 1}",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = editorFontFamily(appearance.fontFamily),
+                                    fontSize = (appearance.fontSizeSp - 3).coerceAtLeast(7).sp,
+                                ),
+                                color = TitanColors.TextMuted.copy(alpha = 0.55f),
+                                modifier = Modifier.padding(end = 6.dp),
+                            )
+                        }
                     }
                 }
             }
 
-            BasicTextField(
-                value = androidx.compose.ui.text.input.TextFieldValue(
-                    text = tab.content,
-                    selection = androidx.compose.ui.text.TextRange(
-                        tab.caret.coerceIn(0, tab.content.length),
-                    ),
-                ),
-                onValueChange = { value -> viewModel.edit(value.text, value.selection.start) },
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .padding(8.dp),
-                textStyle = TextStyle(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp,
-                    lineHeight = 20.sp,
-                    color = SyntaxColors.Plain,
-                ),
-                cursorBrush = androidx.compose.ui.graphics.SolidColor(TitanColors.Primary),
-                visualTransformation = SyntaxHighlightTransformation(tab.language),
+            // Wrapping is a real setting. Compose's BasicTextField always wraps, so with
+            // wrapping off the field is given unbounded width inside a horizontal scroller:
+            // long lines then extend sideways instead of folding, which is what a developer
+            // expects from a code editor.
+            val editorTextStyle = TextStyle(
+                fontFamily = editorFontFamily(appearance.fontFamily),
+                fontSize = appearance.fontSizeSp.sp,
+                lineHeight = appearance.lineHeightSp.sp,
+                color = SyntaxColors.Plain,
             )
+            val fieldModifier = if (appearance.wordWrap) {
+                Modifier.weight(1f).fillMaxHeight().padding(8.dp)
+            } else {
+                Modifier.fillMaxHeight().padding(8.dp)
+            }
+            if (appearance.wordWrap) {
+                EditorTextField(tab, viewModel, editorTextStyle, fieldModifier)
+            } else {
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .horizontalScroll(rememberScrollState()),
+                ) {
+                    EditorTextField(
+                        tab = tab,
+                        viewModel = viewModel,
+                        textStyle = editorTextStyle,
+                        modifier = Modifier,
+                    )
+                }
+            }
         }
     }
+}
+
+/** The editable field itself, shared by the wrapping and non-wrapping layouts. */
+@Composable
+private fun EditorTextField(
+    tab: EditorTab,
+    viewModel: EditorViewModel,
+    textStyle: TextStyle,
+    modifier: Modifier,
+) {
+    BasicTextField(
+        value = androidx.compose.ui.text.input.TextFieldValue(
+            text = tab.content,
+            selection = androidx.compose.ui.text.TextRange(
+                tab.caret.coerceIn(0, tab.content.length),
+            ),
+        ),
+        onValueChange = { value -> viewModel.edit(value.text, value.selection.start) },
+        modifier = modifier,
+        textStyle = textStyle,
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(TitanColors.Primary),
+        visualTransformation = SyntaxHighlightTransformation(tab.language),
+    )
+}
+
+/**
+ * Maps the stored family name to a real font.
+ *
+ * Only monospace variants are honoured: a proportional font makes code indentation
+ * meaningless, so an unknown value falls back to monospace rather than being applied.
+ */
+private fun editorFontFamily(name: String): FontFamily = when (name.lowercase()) {
+    "serif" -> FontFamily.Serif
+    "sans", "sans-serif" -> FontFamily.SansSerif
+    "cursive" -> FontFamily.Cursive
+    else -> FontFamily.Monospace
 }
 
 /**
