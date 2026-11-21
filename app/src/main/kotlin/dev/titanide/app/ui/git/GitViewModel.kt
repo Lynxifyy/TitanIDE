@@ -12,6 +12,7 @@ import dev.titanide.core.model.Project
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -43,19 +44,37 @@ class GitViewModel(
     init {
         viewModelScope.launch {
             val project = container.projectRepository.getProject(projectId)
-            _state.value = _state.value.copy(project = project, hasToken = container.isGitHubSignedIn())
+            _state.update { it.copy(project = project, hasToken = container.isGitHubSignedIn()) }
             project?.let { refresh() }
         }
     }
 
     private fun root(): File? = _state.value.project?.let { File(it.rootPath) }
 
+    /**
+     * Resolves the repository root or reports why the action cannot run. Silently returning left
+     * the screen unchanged, so a tap looked like it had done nothing at all.
+     */
+    private fun requireRoot(): File? {
+        val root = root()
+        if (root == null) feedback(error = "This project is still loading")
+        return root
+    }
+
+    /**
+     * Sets the feedback banner. Both fields are written every time, so a stale error cannot
+     * linger next to a newer success message (and the other way round).
+     */
+    private fun feedback(message: String? = null, error: String? = null) {
+        _state.update { it.copy(message = message, error = error) }
+    }
+
     fun refresh() {
         val project = _state.value.project ?: return
         val root = File(project.rootPath)
         viewModelScope.launch {
             if (!container.gitService.isRepository(root)) {
-                _state.value = _state.value.copy(isRepository = false)
+                _state.update { it.copy(isRepository = false) }
                 return@launch
             }
             val branch = container.gitService.currentBranch(root)
@@ -63,46 +82,52 @@ class GitViewModel(
             val commits = (container.gitService.log(root, 30) as? Outcome.Ok)?.value.orEmpty()
             val branches = (container.gitService.branches(root) as? Outcome.Ok)?.value.orEmpty()
             val diff = (container.gitService.diff(root, _state.value.stagedDiff) as? Outcome.Ok)?.value.orEmpty()
-            _state.value = _state.value.copy(
-                isRepository = true,
-                branch = branch,
-                status = status,
-                commits = commits,
-                branches = branches,
-                diff = diff,
-            )
+            _state.update {
+                it.copy(
+                    isRepository = true,
+                    branch = branch,
+                    status = status,
+                    commits = commits,
+                    branches = branches,
+                    diff = diff,
+                )
+            }
         }
     }
 
     fun initRepository() {
-        val root = root() ?: return
+        val root = requireRoot() ?: return
         viewModelScope.launch {
-            _state.value = _state.value.copy(busy = true)
+            _state.update { it.copy(busy = true) }
             when (val outcome = container.gitService.init(root)) {
                 is Outcome.Ok -> {
-                    _state.value = _state.value.copy(busy = false, message = "Repository initialised")
+                    _state.update { it.copy(busy = false) }
+                    feedback(message = "Repository initialised")
                     refresh()
                 }
-                is Outcome.Failed -> _state.value = _state.value.copy(busy = false, error = outcome.reason)
+                is Outcome.Failed -> {
+                    _state.update { it.copy(busy = false) }
+                    feedback(error = outcome.reason)
+                }
             }
         }
     }
 
     fun setCommitMessage(text: String) {
-        _state.value = _state.value.copy(commitMessage = text)
+        _state.update { it.copy(commitMessage = text) }
     }
 
     fun setNewBranchName(text: String) {
-        _state.value = _state.value.copy(newBranchName = text)
+        _state.update { it.copy(newBranchName = text) }
     }
 
     fun toggleStagedDiff() {
-        _state.value = _state.value.copy(stagedDiff = !_state.value.stagedDiff)
+        _state.update { it.copy(stagedDiff = !it.stagedDiff) }
         refresh()
     }
 
     fun stage(path: String) {
-        val root = root() ?: return
+        val root = requireRoot() ?: return
         viewModelScope.launch {
             container.gitService.stage(root, listOf(path))
             refresh()
@@ -110,7 +135,7 @@ class GitViewModel(
     }
 
     fun unstage(path: String) {
-        val root = root() ?: return
+        val root = requireRoot() ?: return
         viewModelScope.launch {
             container.gitService.unstage(root, listOf(path))
             refresh()
@@ -118,7 +143,7 @@ class GitViewModel(
     }
 
     fun stageAll() {
-        val root = root() ?: return
+        val root = requireRoot() ?: return
         val paths = _state.value.status.map { it.path }
         if (paths.isEmpty()) return
         viewModelScope.launch {
@@ -128,97 +153,109 @@ class GitViewModel(
     }
 
     fun commit() {
-        val root = root() ?: return
+        val root = requireRoot() ?: return
         val message = _state.value.commitMessage.trim()
         if (message.isEmpty()) {
-            _state.value = _state.value.copy(error = "A commit message is required")
+            feedback(error = "A commit message is required")
             return
         }
         viewModelScope.launch {
-            _state.value = _state.value.copy(busy = true, error = null)
+            _state.update { it.copy(busy = true) }
+            feedback()
             when (val outcome = container.gitService.commit(root, message, null, null)) {
                 is Outcome.Ok -> {
-                    _state.value = _state.value.copy(
-                        busy = false,
-                        commitMessage = "",
-                        message = "Committed ${outcome.value.take(7)}",
-                    )
+                    _state.update { it.copy(busy = false, commitMessage = "") }
+                    feedback(message = "Committed ${outcome.value.take(7)}")
                     refresh()
                 }
-                is Outcome.Failed -> _state.value = _state.value.copy(busy = false, error = outcome.reason)
+                is Outcome.Failed -> {
+                    _state.update { it.copy(busy = false) }
+                    feedback(error = outcome.reason)
+                }
             }
         }
     }
 
     fun push() {
-        val root = root() ?: return
+        val root = requireRoot() ?: return
         val token = container.githubTokenOrNull()
         if (token.isNullOrBlank()) {
-            _state.value = _state.value.copy(error = "Sign in to GitHub or store a token before pushing")
+            feedback(error = "Sign in to GitHub or store a token before pushing")
             return
         }
         viewModelScope.launch {
-            _state.value = _state.value.copy(busy = true, error = null)
+            _state.update { it.copy(busy = true) }
+            feedback()
             when (val outcome = container.gitService.push(root, token)) {
-                is Outcome.Ok -> _state.value = _state.value.copy(busy = false, message = "Pushed to origin")
-                is Outcome.Failed -> _state.value = _state.value.copy(busy = false, error = outcome.reason)
+                is Outcome.Ok -> {
+                    _state.update { it.copy(busy = false) }
+                    feedback(message = "Pushed to origin")
+                }
+                is Outcome.Failed -> {
+                    _state.update { it.copy(busy = false) }
+                    feedback(error = outcome.reason)
+                }
             }
         }
     }
 
     fun pull() {
-        val root = root() ?: return
+        val root = requireRoot() ?: return
         val token = container.githubTokenOrNull()
         if (token.isNullOrBlank()) {
-            _state.value = _state.value.copy(error = "Sign in to GitHub before pulling")
+            feedback(error = "Sign in to GitHub before pulling")
             return
         }
         viewModelScope.launch {
-            _state.value = _state.value.copy(busy = true, error = null)
+            _state.update { it.copy(busy = true) }
+            feedback()
             when (val outcome = container.gitService.pull(root, token)) {
                 is Outcome.Ok -> {
-                    _state.value = _state.value.copy(busy = false, message = "Pulled from origin")
+                    _state.update { it.copy(busy = false) }
+                    feedback(message = "Pulled from origin")
                     refresh()
                 }
-                is Outcome.Failed -> _state.value = _state.value.copy(busy = false, error = outcome.reason)
+                is Outcome.Failed -> {
+                    _state.update { it.copy(busy = false) }
+                    feedback(error = outcome.reason)
+                }
             }
         }
     }
 
     fun createBranch() {
-        val root = root() ?: return
+        val root = requireRoot() ?: return
         val name = _state.value.newBranchName.trim()
         if (name.isEmpty()) {
-            _state.value = _state.value.copy(error = "Branch name is required")
+            feedback(error = "Branch name is required")
             return
         }
         viewModelScope.launch {
             when (val outcome = container.gitService.createBranch(root, name)) {
                 is Outcome.Ok -> {
-                    _state.value = _state.value.copy(newBranchName = "", message = "Switched to $name")
+                    _state.update { it.copy(newBranchName = "") }
+                    feedback(message = "Switched to $name")
                     container.registerBranch(projectId, name)
                     refresh()
                 }
-                is Outcome.Failed -> _state.value = _state.value.copy(error = outcome.reason)
+                is Outcome.Failed -> feedback(error = outcome.reason)
             }
         }
     }
 
     fun checkout(name: String) {
-        val root = root() ?: return
+        val root = requireRoot() ?: return
         viewModelScope.launch {
             when (val outcome = container.gitService.checkout(root, name)) {
                 is Outcome.Ok -> {
-                    _state.value = _state.value.copy(message = "Checked out $name")
+                    feedback(message = "Checked out $name")
                     container.registerBranch(projectId, name)
                     refresh()
                 }
-                is Outcome.Failed -> _state.value = _state.value.copy(error = outcome.reason)
+                is Outcome.Failed -> feedback(error = outcome.reason)
             }
         }
     }
 
-    fun clearFeedback() {
-        _state.value = _state.value.copy(message = null, error = null)
-    }
+    fun clearFeedback() = feedback()
 }

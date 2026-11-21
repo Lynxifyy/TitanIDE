@@ -18,11 +18,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CallMerge
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -82,11 +84,37 @@ fun GitScreen(projectId: String, onBack: () -> Unit) {
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            state.message?.let {
-                Text(it, style = MaterialTheme.typography.labelSmall, color = TitanColors.Success)
-            }
-            state.error?.let {
-                Text(it, style = MaterialTheme.typography.labelSmall, color = TitanColors.Error)
+            if (state.message != null || state.error != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    state.message?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TitanColors.Success,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    state.error?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TitanColors.Error,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    IconButton(onClick = viewModel::clearFeedback, modifier = Modifier.size(28.dp)) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = "Dismiss",
+                            tint = TitanColors.TextMuted,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
+                }
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

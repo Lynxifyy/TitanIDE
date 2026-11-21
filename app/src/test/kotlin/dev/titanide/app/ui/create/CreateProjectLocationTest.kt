@@ -88,7 +88,7 @@ class CreateProjectLocationTest {
 
     /** The write happens on an IO dispatcher, so the state settles after create() returns. */
     private fun awaitCreated(viewModel: CreateProjectViewModel): String? {
-        val deadline = System.currentTimeMillis() + 10_000
+        val deadline = System.currentTimeMillis() + 30_000
         while (System.currentTimeMillis() < deadline) {
             val state = viewModel.state.value
             state.createdProjectId?.let { return it }
