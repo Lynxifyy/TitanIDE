@@ -373,6 +373,21 @@ private fun ConfigureStep(state: CreateState, viewModel: CreateProjectViewModel)
             }
         }
 
+        OutlinedTextField(
+            value = state.customLocation,
+            onValueChange = viewModel::setLocation,
+            label = { Text("Location") },
+            placeholder = { Text("Default: app projects folder") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            supportingText = {
+                Text(
+                    "Leave empty to use the app's projects folder.",
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            },
+        )
+
         Spacer(Modifier.height(4.dp))
         Button(
             onClick = viewModel::review,
@@ -404,6 +419,7 @@ private fun ReviewStep(state: CreateState, viewModel: CreateProjectViewModel) {
                     DetailRow("Package", state.packageName)
                     DetailRow("Application ID", state.applicationId.ifBlank { state.packageName })
                     DetailRow("SDK", "min ${state.minSdk} · target ${state.targetSdk}")
+                    DetailRow("Location", state.customLocation.ifBlank { "App projects folder" })
                 }
             }
         }

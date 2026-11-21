@@ -70,7 +70,10 @@ class ProjectScaffolder(
                 )
             }
             if (!targetDir.mkdirs() && !targetDir.exists()) {
-                return@withContext CreateProjectOutcome.Failure("Could not create ${targetDir.absolutePath}")
+                return@withContext CreateProjectOutcome.Failure(
+                    "Could not create ${targetDir.absolutePath}. Android only lets the app write to " +
+                        "its own folders without a storage grant, so pick a location inside one.",
+                )
             }
 
             val request = ScaffoldRequest(

@@ -158,7 +158,7 @@ fun EditorScreen(
                             message = "Pick a file from the explorer to start editing.",
                         )
                     } else {
-                        CodeEditor(active, viewModel, state.appearance)
+                        CodeEditor(active, viewModel, state.appearance, state.autoSave, state.showDiagnostics)
                     }
                 }
                 if (state.showDiagnostics) {
@@ -420,6 +420,8 @@ private fun CodeEditor(
     tab: EditorTab,
     viewModel: EditorViewModel,
     appearance: EditorAppearance,
+    autoSave: Boolean,
+    showDiagnostics: Boolean,
 ) {
     var showMenu by remember { mutableStateOf(false) }
     val lineNumbers = remember(tab.content) { tab.content.count { it == '\n' } + 1 }
@@ -477,6 +479,14 @@ private fun CodeEditor(
                     DropdownMenuItem(
                         text = { Text(if (tab.dirty) "Save now" else "Saved") },
                         onClick = { viewModel.saveActive(); showMenu = false },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (autoSave) "Auto-save: on" else "Auto-save: off") },
+                        onClick = { viewModel.toggleAutoSave(); showMenu = false },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (showDiagnostics) "Hide problems" else "Show problems") },
+                        onClick = { viewModel.toggleDiagnostics(); showMenu = false },
                     )
                 }
             }

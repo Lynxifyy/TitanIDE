@@ -180,6 +180,21 @@ class CreateProjectViewModel(private val container: TitanContainer) : ViewModel(
         _state.value = _state.value.copy(step = WizardStep.REVIEW, error = null)
     }
 
+    /**
+     * A custom location is a parent folder the user chose; the project still gets its own
+     * directory inside it. The default is the app-private projects folder, which is the only
+     * place Android always lets the app write without a storage grant.
+     */
+    private fun resolveTargetDir(projectId: String, customLocation: String): File {
+        val parent = customLocation.trim()
+        if (parent.isEmpty()) return container.storage.projectDir(projectId)
+        val slug = _state.value.name.trim()
+            .replace(Regex("[^A-Za-z0-9._-]"), "-")
+            .trim('-')
+            .ifEmpty { projectId }
+        return File(File(parent), slug)
+    }
+
     /** Writes the project to disk. Nothing is registered unless the generator succeeded. */
     fun create() {
         val current = _state.value
@@ -193,7 +208,7 @@ class CreateProjectViewModel(private val container: TitanContainer) : ViewModel(
         _state.value = current.copy(creating = true, error = null)
         viewModelScope.launch {
             val projectId = UUID.randomUUID().toString()
-            val targetDir = File(container.storage.projectDir(projectId).absolutePath)
+            val targetDir = resolveTargetDir(projectId, current.customLocation)
             val spec = CreateProjectSpec(
                 name = current.name.trim(),
                 packageName = current.packageName.trim(),
