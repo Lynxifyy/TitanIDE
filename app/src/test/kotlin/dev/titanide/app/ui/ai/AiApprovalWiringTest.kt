@@ -2,6 +2,8 @@ package dev.titanide.app.ui.ai
 
 import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.testing.ViewModelTracker
+import dev.titanide.app.testing.resetMainDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -42,12 +44,13 @@ class AiApprovalWiringTest {
 
     @After
     fun restoreMainDispatcher() {
-        Dispatchers.resetMain()
+        ViewModelTracker.clearAll()
+        resetMainDispatcher()
     }
 
     @Test
     fun `a write blocks and the pending tool is shown`() = runBlocking {
-        val viewModel = AiViewModel(container)
+        val viewModel = ViewModelTracker.track(AiViewModel(container))
         val answer = async { viewModel.awaitToolApproval("write_file", args) }
 
         withTimeout(5_000) {
@@ -62,7 +65,7 @@ class AiApprovalWiringTest {
 
     @Test
     fun `denying a write refuses it`() = runBlocking {
-        val viewModel = AiViewModel(container)
+        val viewModel = ViewModelTracker.track(AiViewModel(container))
         val answer = async { viewModel.awaitToolApproval("delete_file", args) }
 
         withTimeout(5_000) { viewModel.state.first { it.pendingApproval != null } }
@@ -72,7 +75,7 @@ class AiApprovalWiringTest {
 
     @Test
     fun `a read is allowed without asking`() = runBlocking {
-        val viewModel = AiViewModel(container)
+        val viewModel = ViewModelTracker.track(AiViewModel(container))
         val allowed = withTimeout(5_000) { viewModel.awaitToolApproval("read_file", args) }
         assertTrue("reading cannot damage anything", allowed)
         assertEquals("nothing should have been surfaced", null, viewModel.state.value.pendingApproval)
@@ -80,7 +83,7 @@ class AiApprovalWiringTest {
 
     @Test
     fun `stopping the agent releases a blocked approval`() = runBlocking {
-        val viewModel = AiViewModel(container)
+        val viewModel = ViewModelTracker.track(AiViewModel(container))
         val answer = async { viewModel.awaitToolApproval("write_file", args) }
         withTimeout(5_000) { viewModel.state.first { it.pendingApproval != null } }
 

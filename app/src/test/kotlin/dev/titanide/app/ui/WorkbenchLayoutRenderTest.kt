@@ -6,9 +6,12 @@ import androidx.compose.ui.test.onRoot
 import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.LocalContainer
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.testing.ViewModelTracker
+import dev.titanide.app.testing.resetMainDispatcher
 import dev.titanide.app.ui.workbench.WorkbenchScreen
 import dev.titanide.app.ui.workbench.WorkbenchViewModel
 import dev.titanide.core.designsystem.TitanTheme
+import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -31,7 +34,7 @@ class WorkbenchLayoutRenderTest {
         val container = TitanContainer(ApplicationProvider.getApplicationContext())
         // Constructed outside the composition so lint's ViewModelConstructorInComposable
         // rule stays clean, and so the same instance survives recomposition.
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         compose.setContent {
             CompositionLocalProvider(LocalContainer provides container) {
                 TitanTheme {
@@ -58,4 +61,8 @@ class WorkbenchLayoutRenderTest {
     @Test
     @Config(qualifiers = "w1280dp-h800dp-xhdpi")
     fun rendersOnATablet() = renderAt("w1280dp-h800dp-xhdpi")
+    @After
+    fun clearTrackedViewModels() {
+        ViewModelTracker.clearAll()
+    }
 }

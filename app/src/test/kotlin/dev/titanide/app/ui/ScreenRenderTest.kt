@@ -7,6 +7,8 @@ import androidx.compose.ui.test.onRoot
 import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.LocalContainer
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.testing.ViewModelTracker
+import dev.titanide.app.testing.resetMainDispatcher
 import dev.titanide.app.ui.ai.AiStudioScreen
 import dev.titanide.app.ui.build.BuildScreen
 import dev.titanide.app.ui.create.CreateProjectScreen
@@ -28,6 +30,7 @@ import dev.titanide.app.ui.tools.UiPreviewScreen
 import dev.titanide.app.ui.workbench.WorkbenchScreen
 import dev.titanide.app.ui.workbench.WorkbenchViewModel
 import dev.titanide.core.designsystem.TitanTheme
+import org.junit.After
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -88,7 +91,7 @@ class ScreenRenderTest {
     @Test
     fun workbenchRenders() {
         val container = TitanContainer(ApplicationProvider.getApplicationContext())
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         renderWith(container) {
             WorkbenchScreen(viewModel = viewModel, onOpenSettings = {}, onOpenProjects = {})
         }
@@ -162,6 +165,11 @@ class ScreenRenderTest {
             "the seven primary destinations are covered by the tests above",
             TitanDestinationCoverage.destinations.all { it.isNotBlank() },
         )
+    }
+
+    @After
+    fun clearTrackedViewModels() {
+        ViewModelTracker.clearAll()
     }
 }
 

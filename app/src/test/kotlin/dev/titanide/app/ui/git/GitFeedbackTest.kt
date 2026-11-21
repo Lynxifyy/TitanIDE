@@ -2,6 +2,8 @@ package dev.titanide.app.ui.git
 
 import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.testing.ViewModelTracker
+import dev.titanide.app.testing.resetMainDispatcher
 import dev.titanide.app.ui.create.CreateProjectViewModel
 import dev.titanide.core.model.ProjectCategory
 import dev.titanide.core.templates.TemplateCatalog
@@ -38,7 +40,7 @@ class GitFeedbackTest {
     fun setUp() = runBlocking {
         Dispatchers.setMain(Dispatchers.Default)
         container = TitanContainer(ApplicationProvider.getApplicationContext())
-        val wizard = CreateProjectViewModel(container)
+        val wizard = ViewModelTracker.track(CreateProjectViewModel(container))
         wizard.setName("GitFeedback")
         wizard.setPackageName("dev.titanide.gitfeedback")
         wizard.selectTemplate(TemplateCatalog.all.first { it.category == ProjectCategory.BLANK })
@@ -53,12 +55,13 @@ class GitFeedbackTest {
 
     @After
     fun tearDown() {
-        Dispatchers.resetMain()
+        ViewModelTracker.clearAll()
+        resetMainDispatcher()
     }
 
     /** A blank project is not a repository yet, so every case starts by creating one. */
     private suspend fun initialisedRepository(): GitViewModel {
-        val viewModel = GitViewModel(container, projectId)
+        val viewModel = ViewModelTracker.track(GitViewModel(container, projectId))
         val deadline = System.currentTimeMillis() + 20_000
         while (viewModel.state.value.project == null && System.currentTimeMillis() < deadline) {
             Thread.sleep(25)
@@ -163,7 +166,7 @@ class GitFeedbackTest {
     fun `an action with no loaded project reports it instead of doing nothing`() = runBlocking {
         // A missing project never loads, which is the same state as tapping a Git button before
         // the project finishes loading.
-        val viewModel = GitViewModel(container, "does-not-exist")
+        val viewModel = ViewModelTracker.track(GitViewModel(container, "does-not-exist"))
 
         viewModel.push()
 
@@ -173,7 +176,7 @@ class GitFeedbackTest {
     @Test
     fun `initialising a repository reports success without an error`() = runBlocking {
         val project = container.projectRepository.getProject(projectId)!!
-        val viewModel = GitViewModel(container, projectId)
+        val viewModel = ViewModelTracker.track(GitViewModel(container, projectId))
         awaitProject(viewModel)
         // A blank project has no repository yet, so init is the operation under test.
         File(project.rootPath, ".git").deleteRecursively()

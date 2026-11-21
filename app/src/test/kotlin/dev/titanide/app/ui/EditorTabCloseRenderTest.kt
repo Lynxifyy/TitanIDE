@@ -9,6 +9,8 @@ import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.LocalContainer
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.testing.ViewModelTracker
+import dev.titanide.app.testing.resetMainDispatcher
 import dev.titanide.app.ui.workbench.WorkbenchScreen
 import dev.titanide.app.ui.workbench.WorkbenchViewModel
 import dev.titanide.core.designsystem.TitanTheme
@@ -17,6 +19,7 @@ import dev.titanide.core.model.ProjectCategory
 import dev.titanide.core.templates.CreateProjectOutcome
 import dev.titanide.core.templates.CreateProjectSpec
 import kotlinx.coroutines.runBlocking
+import org.junit.After
 import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
@@ -74,7 +77,7 @@ class EditorTabCloseRenderTest {
         val path = "src/Dirty.kt"
         File(project.rootPath, path).apply { parentFile?.mkdirs() }.writeText("val a = 1\n")
 
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         awaitUntil("the workbench to load the project") { viewModel.state.value.projectPath != null }
 
         viewModel.openFile(path)
@@ -103,5 +106,9 @@ class EditorTabCloseRenderTest {
         awaitUntil("the close to be held pending") { viewModel.pendingClose.value == path }
         viewModel.discardAndCloseTab()
         assertNull(viewModel.pendingClose.value)
+    }
+    @After
+    fun clearTrackedViewModels() {
+        ViewModelTracker.clearAll()
     }
 }

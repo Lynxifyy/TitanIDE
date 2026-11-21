@@ -2,6 +2,8 @@ package dev.titanide.app.ui.workbench
 
 import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.testing.ViewModelTracker
+import dev.titanide.app.testing.resetMainDispatcher
 import dev.titanide.core.model.Language
 import dev.titanide.core.templates.CreateProjectOutcome
 import dev.titanide.core.templates.CreateProjectSpec
@@ -43,7 +45,8 @@ class WorkbenchFileOpsTest {
 
     @After
     fun restoreMainDispatcher() {
-        Dispatchers.resetMain()
+        ViewModelTracker.clearAll()
+        resetMainDispatcher()
     }
 
     private fun scaffoldProject(id: String): String = runBlocking {
@@ -83,7 +86,7 @@ class WorkbenchFileOpsTest {
     @Test
     fun `creating a folder writes a real directory`() = runBlocking {
         val id = scaffoldProject("ops-folder")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         viewModel.createDirectory("feature/ui")
@@ -96,7 +99,7 @@ class WorkbenchFileOpsTest {
     @Test
     fun `renaming a file moves it on disk and carries the open buffer`() = runBlocking {
         val id = scaffoldProject("ops-rename")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         val from = viewModel.firstKotlinFile()
@@ -117,7 +120,7 @@ class WorkbenchFileOpsTest {
     @Test
     fun `renaming keeps unsaved edits instead of reverting them`() = runBlocking {
         val id = scaffoldProject("ops-rename-dirty")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         val from = viewModel.firstKotlinFile()
@@ -139,7 +142,7 @@ class WorkbenchFileOpsTest {
     @Test
     fun `duplicating a file creates a real copy and leaves the original`() = runBlocking {
         val id = scaffoldProject("ops-copy")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         val from = viewModel.firstKotlinFile()
@@ -160,7 +163,7 @@ class WorkbenchFileOpsTest {
     @Test
     fun `deleting a directory closes the buffers of its children`() = runBlocking {
         val id = scaffoldProject("ops-delete-dir")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         viewModel.createDirectory("scratch")
@@ -183,7 +186,7 @@ class WorkbenchFileOpsTest {
     @Test
     fun `unsaved changes are reported so the delete prompt can warn`() = runBlocking {
         val id = scaffoldProject("ops-dirty-flag")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         val path = viewModel.firstKotlinFile()
@@ -202,7 +205,7 @@ class WorkbenchFileOpsTest {
     @Test
     fun `a rename onto an existing path is refused rather than overwriting`() = runBlocking {
         val id = scaffoldProject("ops-collision")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         val from = viewModel.firstKotlinFile()

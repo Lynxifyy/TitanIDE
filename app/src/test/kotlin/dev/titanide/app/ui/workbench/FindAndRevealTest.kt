@@ -2,6 +2,8 @@ package dev.titanide.app.ui.workbench
 
 import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.testing.ViewModelTracker
+import dev.titanide.app.testing.resetMainDispatcher
 import dev.titanide.core.templates.CreateProjectOutcome
 import dev.titanide.core.templates.CreateProjectSpec
 import kotlinx.coroutines.Dispatchers
@@ -40,7 +42,8 @@ class FindAndRevealTest {
 
     @After
     fun tearDown() {
-        Dispatchers.resetMain()
+        ViewModelTracker.clearAll()
+        resetMainDispatcher()
     }
 
     private val sample = """
@@ -68,7 +71,7 @@ class FindAndRevealTest {
         container.projectRepository.register((outcome as CreateProjectOutcome.Success).project)
         File(container.storage.projectDir(id), path).writeText(content)
 
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         withTimeout(10_000) { viewModel.project.first { it?.id == id } }
         viewModel.openFile(path)
         // openFile publishes the buffer just before the tab, so wait for both or the

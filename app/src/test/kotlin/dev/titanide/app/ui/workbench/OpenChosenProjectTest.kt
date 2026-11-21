@@ -2,6 +2,8 @@ package dev.titanide.app.ui.workbench
 
 import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.testing.ViewModelTracker
+import dev.titanide.app.testing.resetMainDispatcher
 import dev.titanide.app.ui.create.CreateProjectViewModel
 import dev.titanide.core.model.ProjectCategory
 import dev.titanide.core.templates.TemplateCatalog
@@ -34,7 +36,7 @@ class OpenChosenProjectTest {
     private lateinit var olderId: String
 
     private fun scaffold(name: String): String = runBlocking {
-        val wizard = CreateProjectViewModel(container)
+        val wizard = ViewModelTracker.track(CreateProjectViewModel(container))
         wizard.setName(name)
         wizard.setPackageName("dev.titanide.${name.lowercase()}")
         wizard.selectTemplate(TemplateCatalog.all.first { it.category == ProjectCategory.BLANK })
@@ -58,7 +60,8 @@ class OpenChosenProjectTest {
 
     @After
     fun tearDown() {
-        Dispatchers.resetMain()
+        ViewModelTracker.clearAll()
+        resetMainDispatcher()
     }
 
     private suspend fun awaitProject(viewModel: WorkbenchViewModel, id: String) {
@@ -71,7 +74,7 @@ class OpenChosenProjectTest {
 
     @Test
     fun `opening a project switches to it even when another was opened more recently`() = runBlocking {
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         // Let the default selection settle first, so the switch is what is being measured.
         awaitProject(viewModel, recentId)
         assertNotEquals("precondition: the two projects must be distinguishable", olderId, recentId)
@@ -90,7 +93,7 @@ class OpenChosenProjectTest {
 
     @Test
     fun `opening a project records it as opened`() = runBlocking {
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         awaitProject(viewModel, recentId)
 
         viewModel.openProject(olderId)

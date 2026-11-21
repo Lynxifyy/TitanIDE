@@ -2,6 +2,8 @@ package dev.titanide.app.ui.github
 
 import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.testing.ViewModelTracker
+import dev.titanide.app.testing.resetMainDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -69,7 +71,8 @@ class GitHubViewModelFailureTest {
     @After
     fun stop() {
         server.close()
-        Dispatchers.resetMain()
+        ViewModelTracker.clearAll()
+        resetMainDispatcher()
     }
 
     /** The repository itself resolves; every listing inside it fails as GitHub does when limited. */
@@ -95,7 +98,7 @@ class GitHubViewModelFailureTest {
         withTimeout(15_000) { container.gitHubAuth.first { it.isSettled } }
         container.setGitHubToken("token")
 
-        val viewModel = GitHubViewModel(container, repoFullName = "me/limited")
+        val viewModel = ViewModelTracker.track(GitHubViewModel(container, repoFullName = "me/limited"))
         val state = withTimeout(15_000) {
             viewModel.detail.first { !it.loading && (it.error != null || it.entries.isNotEmpty()) }
         }

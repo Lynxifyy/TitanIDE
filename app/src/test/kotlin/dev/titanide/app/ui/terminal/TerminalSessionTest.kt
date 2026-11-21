@@ -2,6 +2,8 @@ package dev.titanide.app.ui.terminal
 
 import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.testing.ViewModelTracker
+import dev.titanide.app.testing.resetMainDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -39,12 +41,13 @@ class TerminalSessionTest {
 
     @After
     fun restoreMainDispatcher() {
-        Dispatchers.resetMain()
+        ViewModelTracker.clearAll()
+        resetMainDispatcher()
     }
 
     /** Waits for the init block to publish a session, so tests do not race it. */
     private fun newViewModel(): TerminalViewModel {
-        val viewModel = TerminalViewModel(container)
+        val viewModel = ViewModelTracker.track(TerminalViewModel(container))
         runBlocking { withTimeout(10_000) { viewModel.state.first { it.sessions.isNotEmpty() } } }
         return viewModel
     }

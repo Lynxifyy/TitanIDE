@@ -2,6 +2,8 @@ package dev.titanide.app.ui.workbench
 
 import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.testing.ViewModelTracker
+import dev.titanide.app.testing.resetMainDispatcher
 import dev.titanide.app.ui.create.CreateProjectViewModel
 import dev.titanide.core.model.ProjectCategory
 import dev.titanide.core.templates.TemplateCatalog
@@ -37,7 +39,7 @@ class WorkbenchAutoSaveTest {
         Dispatchers.setMain(Dispatchers.Default)
         container = TitanContainer(ApplicationProvider.getApplicationContext())
         container.settings.updateEditor { it.copy(autoSave = true, autoSaveDelayMs = 1_200) }
-        val wizard = CreateProjectViewModel(container)
+        val wizard = ViewModelTracker.track(CreateProjectViewModel(container))
         wizard.setName("WorkbenchSave")
         wizard.setPackageName("dev.titanide.workbenchsave")
         wizard.selectTemplate(TemplateCatalog.all.first { it.category == ProjectCategory.BLANK })
@@ -53,13 +55,14 @@ class WorkbenchAutoSaveTest {
     @After
     fun tearDown() = runBlocking {
         container.settings.updateEditor { it.copy(autoSave = true, autoSaveDelayMs = 1_200) }
-        Dispatchers.resetMain()
+        ViewModelTracker.clearAll()
+        resetMainDispatcher()
     }
 
     private suspend fun openedWorkbench(path: String, content: String): WorkbenchViewModel {
         val project = container.projectRepository.getProject(projectId)!!
         container.fileTreeRepository.write(project, path, content)
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         val deadline = System.currentTimeMillis() + 20_000
         while (viewModel.state.value.projectPath == null && System.currentTimeMillis() < deadline) {
             Thread.sleep(25)

@@ -2,6 +2,8 @@ package dev.titanide.app.ui.workbench
 
 import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.testing.ViewModelTracker
+import dev.titanide.app.testing.resetMainDispatcher
 import dev.titanide.core.model.Diagnostic
 import dev.titanide.core.model.Language
 import dev.titanide.core.model.ProjectCategory
@@ -55,7 +57,8 @@ class WorkbenchViewModelTest {
 
     @After
     fun restoreMainDispatcher() {
-        Dispatchers.resetMain()
+        ViewModelTracker.clearAll()
+        resetMainDispatcher()
     }
 
     private fun scaffoldProject(id: String, name: String = "BenchDemo"): String = runBlocking {
@@ -89,7 +92,7 @@ class WorkbenchViewModelTest {
     @Test
     fun `loads the project and lists its real files`() = runBlocking {
         val id = scaffoldProject("bench-load")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         val tree = withTimeout(10_000) { viewModel.androidTree.first { it.isNotEmpty() } }
@@ -103,7 +106,7 @@ class WorkbenchViewModelTest {
     @Test
     fun `opening a file loads its real content from disk`() = runBlocking {
         val id = scaffoldProject("bench-open")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         val path = viewModel.firstKotlinFile()
@@ -120,7 +123,7 @@ class WorkbenchViewModelTest {
     @Test
     fun `editing marks the buffer dirty and saving writes through to disk`() = runBlocking {
         val id = scaffoldProject("bench-save")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         val path = viewModel.firstKotlinFile()
@@ -141,7 +144,7 @@ class WorkbenchViewModelTest {
     @Test
     fun `auto save persists the edit without an explicit save`() = runBlocking {
         val id = scaffoldProject("bench-autosave")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         val path = viewModel.firstKotlinFile()
@@ -164,7 +167,7 @@ class WorkbenchViewModelTest {
     fun `auto save waits the delay configured in settings`() = runBlocking {
         val id = scaffoldProject("bench-autosave-delay")
         container.settings.updateEditor { it.copy(autoSave = true, autoSaveDelayMs = 3_000) }
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         val path = viewModel.firstKotlinFile()
@@ -191,7 +194,7 @@ class WorkbenchViewModelTest {
     @Test
     fun `undo reverts the last edit`() = runBlocking {
         val id = scaffoldProject("bench-undo")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         val path = viewModel.firstKotlinFile()
@@ -209,7 +212,7 @@ class WorkbenchViewModelTest {
     @Test
     fun `code guard reports a real problem in the open buffer`() = runBlocking {
         val id = scaffoldProject("bench-guard")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         val path = viewModel.firstKotlinFile()
@@ -229,7 +232,7 @@ class WorkbenchViewModelTest {
     @Test
     fun `search finds text in files that are not open`() = runBlocking {
         val id = scaffoldProject("bench-search")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
         withTimeout(10_000) { viewModel.projectTree.first { it.isNotEmpty() } }
 
@@ -244,7 +247,7 @@ class WorkbenchViewModelTest {
     @Test
     fun `creating a file writes it and opens it`() = runBlocking {
         val id = scaffoldProject("bench-create")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         viewModel.createFile("src/NewFile.kt")
@@ -260,7 +263,7 @@ class WorkbenchViewModelTest {
     @Test
     fun `deleting a file removes it from disk and closes its tab`() = runBlocking {
         val id = scaffoldProject("bench-delete")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         viewModel.createFile("src/Doomed.kt")
@@ -278,7 +281,7 @@ class WorkbenchViewModelTest {
 
     @Test
     fun `activity and bottom tool selection drive the state`() {
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
 
         viewModel.selectActivity(Activity.SEARCH)
         assertEquals(Activity.SEARCH, viewModel.state.value.activity)
@@ -293,7 +296,7 @@ class WorkbenchViewModelTest {
 
     @Test
     fun `layout adapts to the reported window size`() {
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
 
         viewModel.onSizeChanged(412, 915)
         assertFalse("a phone should not show a persistent sidebar", viewModel.state.value.policy.showSidebar)
@@ -307,7 +310,7 @@ class WorkbenchViewModelTest {
     @Test
     fun `closing a tab drops its buffer`() = runBlocking {
         val id = scaffoldProject("bench-close")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         viewModel.createFile("src/Temp.kt")
@@ -329,7 +332,7 @@ class WorkbenchViewModelTest {
     @Test
     fun `replace uses the current text, not ranges recorded before an edit`() = runBlocking {
         val id = scaffoldProject("bench-replace-stale")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         val path = viewModel.firstKotlinFile()
@@ -362,7 +365,7 @@ class WorkbenchViewModelTest {
     @Test
     fun `find matches follow the active tab`() = runBlocking {
         val id = scaffoldProject("bench-find-scope")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         val files = withTimeout(10_000) {
@@ -403,7 +406,7 @@ class WorkbenchViewModelTest {
     @Test
     fun `renaming a file keeps its undo history`() = runBlocking {
         val id = scaffoldProject("bench-rename-undo")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         val path = viewModel.firstKotlinFile()
@@ -434,7 +437,7 @@ class WorkbenchViewModelTest {
     @Test
     fun `deleting the active file clears its diagnostics`() = runBlocking {
         val id = scaffoldProject("bench-delete-diagnostics")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         val path = "src/Doomed.kt"
@@ -462,7 +465,7 @@ class WorkbenchViewModelTest {
     @Test
     fun `undo in one file does not apply another file's edit`() = runBlocking {
         val id = scaffoldProject("bench-undo-scope")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         val files = withTimeout(10_000) {
@@ -499,7 +502,7 @@ class WorkbenchViewModelTest {
     @Test
     fun `closing a dirty tab asks before discarding the edits`() = runBlocking {
         val id = scaffoldProject("bench-close-dirty")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         val path = viewModel.firstKotlinFile()
@@ -526,7 +529,7 @@ class WorkbenchViewModelTest {
     @Test
     fun `closing a clean tab does not ask`() = runBlocking {
         val id = scaffoldProject("bench-close-clean")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         val path = viewModel.firstKotlinFile()
@@ -546,7 +549,7 @@ class WorkbenchViewModelTest {
     @Test
     fun `switching tabs swaps in that file's diagnostics`() = runBlocking {
         val id = scaffoldProject("bench-diag-switch")
-        val viewModel = WorkbenchViewModel(container)
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         viewModel.awaitProject(id)
 
         val files = withTimeout(10_000) {
@@ -590,7 +593,7 @@ class WorkbenchViewModelTest {
     fun `a stale analysis cannot overwrite newer diagnostics`() = runBlocking {
         val id = scaffoldProject("bench-diag-stale")
         val calls = java.util.concurrent.atomic.AtomicInteger()
-        val viewModel = WorkbenchViewModel(container) { _, _, path ->
+        val viewModel = ViewModelTracker.track(WorkbenchViewModel(container) { _, _, path ->
             if (calls.getAndIncrement() == 0) {
                 // Slow enough to still be running when the second analysis finishes.
                 Thread.sleep(1_500)
@@ -607,7 +610,7 @@ class WorkbenchViewModelTest {
             } else {
                 emptyList()
             }
-        }
+        })
         viewModel.awaitProject(id)
 
         val path = viewModel.firstKotlinFile()

@@ -200,17 +200,9 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
             outcome.startFailure?.let { failure ->
                 appendTo(session.id, TerminalLine(failure, isError = true))
             }
-            appendTo(
-                session.id,
-                TerminalLine(
-                    when {
-                        outcome.cancelled -> "[cancelled]"
-                        outcome.timedOut -> "[timed out after 120s]"
-                        else -> "[exit ${outcome.exitCode}]"
-                    },
-                    isError = outcome.exitCode != 0,
-                ),
-            )
+            statusLine(outcome, 120)?.let { (text, isError) ->
+                appendTo(session.id, TerminalLine(text, isError = isError))
+            }
             setRunning(session.id, false, outcome.exitCode)
             jobs.remove(session.id)
         }
@@ -312,5 +304,16 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
     companion object {
         private const val MAX_LINES = 2000
         private const val DEFAULT_MAX_SESSIONS = 4
+
+        /**
+         * The closing line for a finished command. A command that never started has no exit
+         * status, so it gets none: printing `[exit -1]` claimed a status no process produced.
+         */
+        fun statusLine(outcome: ProcessRunner.Outcome, timeoutSeconds: Long): Pair<String, Boolean>? = when {
+            outcome.startFailure != null -> null
+            outcome.cancelled -> "[cancelled]" to true
+            outcome.timedOut -> "[timed out after ${timeoutSeconds}s]" to true
+            else -> "[exit ${outcome.exitCode}]" to (outcome.exitCode != 0)
+        }
     }
 }

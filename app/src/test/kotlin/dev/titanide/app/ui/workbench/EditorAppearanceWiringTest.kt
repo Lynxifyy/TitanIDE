@@ -2,6 +2,8 @@ package dev.titanide.app.ui.workbench
 
 import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.testing.ViewModelTracker
+import dev.titanide.app.testing.resetMainDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -40,10 +42,11 @@ class EditorAppearanceWiringTest {
     @After
     fun tearDown() {
         runBlocking { container.settings.updateEditor { dev.titanide.core.data.settings.EditorSettings() } }
-        Dispatchers.resetMain()
+        ViewModelTracker.clearAll()
+        resetMainDispatcher()
     }
 
-    private fun viewModel(): WorkbenchViewModel = WorkbenchViewModel(container)
+    private fun viewModel(): WorkbenchViewModel = ViewModelTracker.track(WorkbenchViewModel(container))
 
     @Test
     fun `font size and line height come from settings`() = runBlocking {

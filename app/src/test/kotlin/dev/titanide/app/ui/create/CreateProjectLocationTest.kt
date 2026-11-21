@@ -2,6 +2,8 @@ package dev.titanide.app.ui.create
 
 import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.testing.ViewModelTracker
+import dev.titanide.app.testing.resetMainDispatcher
 import dev.titanide.core.model.ProjectCategory
 import dev.titanide.core.templates.TemplateCatalog
 import kotlinx.coroutines.Dispatchers
@@ -40,13 +42,14 @@ class CreateProjectLocationTest {
 
     @After
     fun tearDown() {
-        Dispatchers.resetMain()
+        ViewModelTracker.clearAll()
+        resetMainDispatcher()
     }
 
     @Test
     fun `a chosen location is where the project is written`() {
         val parent = File(container.storage.projectsRoot.parentFile, "chosen-parent").apply { mkdirs() }
-        val viewModel = CreateProjectViewModel(container)
+        val viewModel = ViewModelTracker.track(CreateProjectViewModel(container))
 
         viewModel.setName("Located App")
         viewModel.selectTemplate(blankTemplate())
@@ -68,7 +71,7 @@ class CreateProjectLocationTest {
 
     @Test
     fun `an empty location keeps the app projects folder`() {
-        val viewModel = CreateProjectViewModel(container)
+        val viewModel = ViewModelTracker.track(CreateProjectViewModel(container))
 
         viewModel.setName("Default App")
         viewModel.selectTemplate(blankTemplate())
