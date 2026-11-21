@@ -11,6 +11,7 @@ import dev.titanide.core.opencode.net.OpenCodeException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -97,33 +98,39 @@ class OpenCodeSession(
      */
     fun connect(url: String, token: String?, directory: String, reuseSessionId: String? = null) {
         if (url.isBlank()) {
-            _state.value = _state.value.copy(
-                connection = OpenCodeConnection.Failed("No OpenCode server URL configured. Set one in Settings."),
-            )
+            _state.update {
+                it.copy(
+                    connection = OpenCodeConnection.Failed("No OpenCode server URL configured. Set one in Settings."),
+                )
+            }
             return
         }
         serverUrl = url
-        _state.value = _state.value.copy(connection = OpenCodeConnection.Connecting(url))
+        _state.update { it.copy(connection = OpenCodeConnection.Connecting(url)) }
         val newClient = clientFactory(url, token)
         client = newClient
 
         scope.launch {
             try {
                 val info = newClient.info()
-                _state.value = _state.value.copy(
-                    connection = OpenCodeConnection.Connected(
-                        version = info.version.ifBlank { "unknown" },
-                        url = url,
-                    ),
-                )
+                _state.update {
+                    it.copy(
+                        connection = OpenCodeConnection.Connected(
+                            version = info.version.ifBlank { "unknown" },
+                            url = url,
+                        ),
+                    )
+                }
                 openSession(newClient, directory, reuseSessionId)
                 startEvents(newClient)
                 startPolling(newClient)
             } catch (e: OpenCodeException) {
-                _state.value = _state.value.copy(
-                    connection = OpenCodeConnection.Failed(e.message ?: "Connection failed"),
-                    lastError = e.message,
-                )
+                _state.update {
+                    it.copy(
+                        connection = OpenCodeConnection.Failed(e.message ?: "Connection failed"),
+                        lastError = e.message,
+                    )
+                }
             }
         }
     }
@@ -136,11 +143,13 @@ class OpenCodeSession(
         pollJob?.cancel()
         eventJob?.cancel()
         client = null
-        _state.value = _state.value.copy(
-            connection = OpenCodeConnection.Failed(message),
-            running = false,
-            lastError = message,
-        )
+        _state.update {
+            it.copy(
+                connection = OpenCodeConnection.Failed(message),
+                running = false,
+                lastError = message,
+            )
+        }
     }
 
     private suspend fun openSession(client: OpenCodeClient, directory: String, reuseSessionId: String?) {
@@ -155,18 +164,22 @@ class OpenCodeSession(
         if (directory.isNotBlank()) {
             runCatching { client.moveSession(session.id, directory) }
                 .onFailure { e ->
-                    _state.value = _state.value.copy(
-                        notice = "Agent is working in the server's default directory, not " +
-                            "$directory: ${e.message}",
-                    )
+                    _state.update {
+                        it.copy(
+                            notice = "Agent is working in the server's default directory, not " +
+                                "$directory: ${e.message}",
+                        )
+                    }
                 }
-                .onSuccess { _state.value = _state.value.copy(notice = null) }
+                .onSuccess { _state.update { it.copy(notice = null) } }
         }
-        _state.value = _state.value.copy(
-            sessionId = session.id,
-            sessionTitle = session.title ?: directory.substringAfterLast('/'),
-            lastError = null,
-        )
+        _state.update {
+            it.copy(
+                sessionId = session.id,
+                sessionTitle = session.title ?: directory.substringAfterLast('/'),
+                lastError = null,
+            )
+        }
         refresh(client, session.id)
     }
 
@@ -192,9 +205,11 @@ class OpenCodeSession(
                     throw e
                 } catch (e: Exception) {
                     // A dropped stream is expected; log it and reconnect after a pause.
-                    _state.value = _state.value.copy(
-                        lastError = "Live updates paused: ${e.message}. Retrying.",
-                    )
+                    _state.update {
+                        it.copy(
+                            lastError = "Live updates paused: ${e.message}. Retrying.",
+                        )
+                    }
                     delay(EVENT_RETRY_MS)
                 }
             }
@@ -215,7 +230,7 @@ class OpenCodeSession(
                 runCatching { refresh(client, id) }
                     .onFailure { e ->
                         if (e is OpenCodeException) {
-                            _state.value = _state.value.copy(lastError = e.message)
+                            _state.update { it.copy(lastError = e.message) }
                         }
                     }
                 // Slower while the event stream is live; it carries the fast path.
@@ -239,13 +254,15 @@ class OpenCodeSession(
         val permissions = runCatching { client.permissions(sessionId) }.getOrDefault(emptyList())
         val diffs = runCatching { client.diff(sessionId) }.getOrDefault(emptyList())
 
-        _state.value = _state.value.copy(
-            activity = activity,
-            running = lastAssistantIncomplete || anyToolRunning || permissions.isNotEmpty(),
-            pendingPermissions = permissions,
-            changedFiles = diffs,
-            lastError = null,
-        )
+        _state.update {
+            it.copy(
+                activity = activity,
+                running = lastAssistantIncomplete || anyToolRunning || permissions.isNotEmpty(),
+                pendingPermissions = permissions,
+                changedFiles = diffs,
+                lastError = null,
+            )
+        }
     }
 
     /** Sends a user turn. Does not block until the agent finishes; the poll picks it up. */
@@ -257,7 +274,7 @@ class OpenCodeSession(
         scope.launch {
             try {
                 client.prompt(sessionId, text)
-                _state.value = _state.value.copy(running = true, lastError = null)
+                _state.update { it.copy(running = true, lastError = null) }
                 refresh(client, sessionId)
             } catch (e: OpenCodeException) {
                 fail(e.message ?: "Prompt failed")
@@ -270,7 +287,7 @@ class OpenCodeSession(
         val sessionId = _state.value.sessionId ?: return
         scope.launch {
             runCatching { client.interrupt(sessionId) }
-            _state.value = _state.value.copy(running = false)
+            _state.update { it.copy(running = false) }
         }
     }
 
@@ -280,8 +297,9 @@ class OpenCodeSession(
         scope.launch {
             try {
                 client.replyPermission(sessionId, requestId, PermissionReplyBody(decision))
-                val remaining = _state.value.pendingPermissions.filterNot { it.id == requestId }
-                _state.value = _state.value.copy(pendingPermissions = remaining)
+                _state.update { state ->
+                    state.copy(pendingPermissions = state.pendingPermissions.filterNot { it.id == requestId })
+                }
             } catch (e: OpenCodeException) {
                 fail(e.message ?: "Could not answer the permission request")
             }
@@ -307,7 +325,7 @@ class OpenCodeSession(
     fun currentServerUrl(): String = serverUrl
 
     private fun fail(message: String) {
-        _state.value = _state.value.copy(lastError = message)
+        _state.update { it.copy(lastError = message) }
     }
 
     private companion object {

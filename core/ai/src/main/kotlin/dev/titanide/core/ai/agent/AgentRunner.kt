@@ -8,6 +8,7 @@ import dev.titanide.core.ai.ChatResult
 import dev.titanide.core.ai.Prompts
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -97,7 +98,7 @@ class AgentRunner(
     }
 
     fun cancel() {
-        _state.value = _state.value.copy(running = false)
+        _state.update { it.copy(running = false) }
     }
 
     private suspend fun runLoop(goal: String, context: AiContext?) {
@@ -118,7 +119,7 @@ class AgentRunner(
                 is ChatResult.Success -> result.response.content
                 is ChatResult.Failure -> {
                     emit(AgentEvent.Failed("Model call failed: ${result.reason}"))
-                    _state.value = _state.value.copy(running = false)
+                    _state.update { it.copy(running = false) }
                     return
                 }
             }
@@ -137,7 +138,7 @@ class AgentRunner(
                 } else {
                     emit(AgentEvent.Completed(summary, verified = true))
                 }
-                _state.value = _state.value.copy(running = false)
+                _state.update { it.copy(running = false) }
                 return
             }
 
@@ -171,7 +172,7 @@ class AgentRunner(
             history += "Step $step: called $toolName -> ${if (result.ok) "success" else "failure"}: " +
                 result.output.lineSequence().take(6).joinToString(" ").take(400)
 
-            _state.value = _state.value.copy(stepCount = step)
+            _state.update { it.copy(stepCount = step) }
             delay(50)
         }
 
@@ -181,11 +182,11 @@ class AgentRunner(
             else -> "The agent reached the step limit without ever running a build or test."
         }
         emit(AgentEvent.Blocked(reason))
-        _state.value = _state.value.copy(running = false)
+        _state.update { it.copy(running = false) }
     }
 
     private fun emit(event: AgentEvent) {
-        _state.value = _state.value.copy(steps = _state.value.steps + event)
+        _state.update { it.copy(steps = it.steps + event) }
     }
 
     private fun parseField(text: String, field: String): String? {

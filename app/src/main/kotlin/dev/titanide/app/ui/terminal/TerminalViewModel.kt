@@ -102,17 +102,19 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
     }
 
     fun closeSession(index: Int) {
-        val session = _state.value.sessions.getOrNull(index) ?: return
-        jobs.remove(session.id)?.cancel()
-        container.processRunner.cancel(session.id)
-        val sessions = _state.value.sessions.toMutableList()
-        sessions.removeAt(index)
-        _state.update {
-            it.copy(
+        val sessionId = _state.value.sessions.getOrNull(index)?.id ?: return
+        // Removal happens inside the update, keyed by id: a running command is appending
+        // output to the list at the same time, and a snapshot taken before the update would
+        // drop whatever landed in between.
+        _state.update { state ->
+            val sessions = state.sessions.filterNot { it.id == sessionId }
+            state.copy(
                 sessions = sessions,
-                activeIndex = it.activeIndex.coerceAtMost((sessions.size - 1).coerceAtLeast(0)),
+                activeIndex = state.activeIndex.coerceAtMost((sessions.size - 1).coerceAtLeast(0)),
             )
         }
+        jobs.remove(sessionId)?.cancel()
+        container.processRunner.cancel(sessionId)
     }
 
     fun selectSession(index: Int) {
@@ -223,12 +225,13 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
     }
 
     fun clear() {
-        val session = _state.value.active ?: return
-        val sessions = _state.value.sessions.toMutableList()
-        val index = sessions.indexOfFirst { it.id == session.id }
-        if (index >= 0) {
+        val activeId = _state.value.active?.id ?: return
+        _state.update { state ->
+            val index = state.sessions.indexOfFirst { it.id == activeId }
+            if (index < 0) return@update state
+            val sessions = state.sessions.toMutableList()
             sessions[index] = sessions[index].copy(lines = emptyList())
-            _state.update { it.copy(sessions = sessions) }
+            state.copy(sessions = sessions)
         }
     }
 
@@ -247,15 +250,17 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
             appendLine("cd: ${error.message}", isError = true)
             return
         }
-        val sessions = _state.value.sessions.toMutableList()
-        val index = sessions.indexOfFirst { it.id == session.id }
-        if (index < 0) return
         if (!canonical.isDirectory) {
             appendLine("cd: no such directory: $path", isError = true)
             return
         }
-        sessions[index] = sessions[index].copy(cwd = canonical.absolutePath)
-        _state.update { it.copy(sessions = sessions) }
+        _state.update { state ->
+            val index = state.sessions.indexOfFirst { it.id == session.id }
+            if (index < 0) return@update state
+            val sessions = state.sessions.toMutableList()
+            sessions[index] = sessions[index].copy(cwd = canonical.absolutePath)
+            state.copy(sessions = sessions)
+        }
     }
 
     private fun appendSystem(text: String) {
@@ -273,7 +278,7 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
      * line has to be appended inside the update. Reading the list first dropped lines that another
      * write landed in between.
      */
-    private fun appendTo(sessionId: String, line: TerminalLine) {
+    internal fun appendTo(sessionId: String, line: TerminalLine) {
         _state.update { state ->
             val index = state.sessions.indexOfFirst { it.id == sessionId }
             if (index < 0) return@update state

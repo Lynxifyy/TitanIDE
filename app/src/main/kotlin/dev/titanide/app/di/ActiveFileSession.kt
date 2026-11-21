@@ -1,5 +1,6 @@
 package dev.titanide.app.di
 
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -35,18 +36,20 @@ class ActiveFileSession {
     val current: StateFlow<Snapshot> = _current.asStateFlow()
 
     fun update(projectId: String?, path: String?, content: String, language: String?) {
-        _current.value = _current.value.copy(
-            projectId = projectId,
-            path = path,
-            content = content,
-            language = language,
-            selectionStart = -1,
-            selectionEnd = -1,
-        )
+        _current.update {
+            it.copy(
+                projectId = projectId,
+                path = path,
+                content = content,
+                language = language,
+                selectionStart = -1,
+                selectionEnd = -1,
+            )
+        }
     }
 
     fun setSelection(start: Int, end: Int) {
-        _current.value = _current.value.copy(selectionStart = start, selectionEnd = end)
+        _current.update { it.copy(selectionStart = start, selectionEnd = end) }
     }
 
     fun clear() {

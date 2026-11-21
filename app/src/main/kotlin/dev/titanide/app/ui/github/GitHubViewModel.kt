@@ -20,6 +20,7 @@ import dev.titanide.core.model.Language
 import dev.titanide.core.model.Project
 import dev.titanide.core.model.ProjectCategory
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -89,10 +90,10 @@ class GitHubViewModel(
     init {
         viewModelScope.launch {
             val signedIn = container.isGitHubSignedIn()
-            _list.value = _list.value.copy(signedIn = signedIn)
+            _list.update { it.copy(signedIn = signedIn) }
             if (signedIn) {
                 loadRepositories()
-                _list.value = _list.value.copy(login = container.gitHubApi.currentUser().getOrNull())
+                _list.update { it.copy(login = container.gitHubApi.currentUser().getOrNull()) }
             }
         }
         repoFullName?.let(::loadRepository)
@@ -100,36 +101,38 @@ class GitHubViewModel(
 
     fun loadRepositories() {
         if (!container.isGitHubSignedIn()) {
-            _list.value = _list.value.copy(error = "Sign in to GitHub from Settings first", signedIn = false)
+            _list.update { it.copy(error = "Sign in to GitHub from Settings first", signedIn = false) }
             return
         }
         viewModelScope.launch {
-            _list.value = _list.value.copy(loading = true, error = null)
+            _list.update { it.copy(loading = true, error = null) }
             container.gitHubApi.listRepositories(sort = _list.value.sort.apiValue).fold(
                 onSuccess = { repos ->
-                    _list.value = _list.value.copy(repos = repos, loading = false)
+                    _list.update { it.copy(repos = repos, loading = false) }
                 },
                 onFailure = { error ->
-                    _list.value = _list.value.copy(
-                        loading = false,
-                        error = error.message ?: "Could not load repositories",
-                    )
+                    _list.update {
+                        it.copy(
+                            loading = false,
+                            error = error.message ?: "Could not load repositories",
+                        )
+                    }
                 },
             )
         }
     }
 
     fun setQuery(query: String) {
-        _list.value = _list.value.copy(query = query)
+        _list.update { it.copy(query = query) }
     }
 
     fun setSort(sort: RepoSort) {
-        _list.value = _list.value.copy(sort = sort)
+        _list.update { it.copy(sort = sort) }
         loadRepositories()
     }
 
     fun togglePrivateOnly() {
-        _list.value = _list.value.copy(onlyPrivate = !_list.value.onlyPrivate)
+        _list.update { it.copy(onlyPrivate = !it.onlyPrivate) }
     }
 
     /** Searches all of GitHub rather than the user's repositories. */
@@ -137,13 +140,13 @@ class GitHubViewModel(
         val query = _list.value.query.trim()
         if (query.isEmpty()) return
         viewModelScope.launch {
-            _list.value = _list.value.copy(searching = true, error = null)
+            _list.update { it.copy(searching = true, error = null) }
             container.gitHubApi.searchRepositories(query).fold(
                 onSuccess = { repos ->
-                    _list.value = _list.value.copy(repos = repos, searching = false)
+                    _list.update { it.copy(repos = repos, searching = false) }
                 },
                 onFailure = { error ->
-                    _list.value = _list.value.copy(searching = false, error = error.message)
+                    _list.update { it.copy(searching = false, error = error.message) }
                 },
             )
         }
@@ -153,39 +156,43 @@ class GitHubViewModel(
 
     private fun loadRepository(fullName: String) {
         viewModelScope.launch {
-            _detail.value = _detail.value.copy(loading = true, error = null)
+            _detail.update { it.copy(loading = true, error = null) }
             val owner = fullName.substringBefore('/')
             val name = fullName.substringAfter('/')
             val repo = _list.value.repos.firstOrNull { it.fullName.equals(fullName, ignoreCase = true) }
                 ?: container.gitHubApi.getRepository(owner, name).getOrNull()
             if (repo == null) {
-                _detail.value = _detail.value.copy(
-                    loading = false,
-                    error = "Could not load $fullName",
-                )
+                _detail.update {
+                    it.copy(
+                        loading = false,
+                        error = "Could not load $fullName",
+                    )
+                }
                 return@launch
             }
             val branches = container.gitHubApi.listBranches(owner, name).getOrDefault(emptyList())
             val commits = container.gitHubApi.listCommits(owner, name, repo?.defaultBranch).getOrDefault(emptyList())
             val entries = container.gitHubApi.listContents(owner, name, "").getOrDefault(emptyList())
-            _detail.value = _detail.value.copy(
-                repo = repo,
-                branches = branches,
-                commits = commits,
-                entries = entries,
-                loading = false,
-            )
+            _detail.update {
+                it.copy(
+                    repo = repo,
+                    branches = branches,
+                    commits = commits,
+                    entries = entries,
+                    loading = false,
+                )
+            }
         }
     }
 
     fun openPath(path: String) {
         val repo = _detail.value.repo ?: return
         viewModelScope.launch {
-            _detail.value = _detail.value.copy(loading = true)
+            _detail.update { it.copy(loading = true) }
             val entries = container.gitHubApi
                 .listContents(repo.owner, repo.name, path, repo.defaultBranch)
                 .getOrDefault(emptyList())
-            _detail.value = _detail.value.copy(entries = entries, path = path, loading = false)
+            _detail.update { it.copy(entries = entries, path = path, loading = false) }
         }
     }
 
@@ -197,7 +204,7 @@ class GitHubViewModel(
         val repo = _detail.value.repo ?: return
         if (_detail.value.importing) return
         viewModelScope.launch {
-            _detail.value = _detail.value.copy(importing = true, importStage = "Cloning ${repo.fullName}", error = null)
+            _detail.update { it.copy(importing = true, importStage = "Cloning ${repo.fullName}", error = null) }
             val projectId = UUID.randomUUID().toString()
             val target = container.storage.projectDir(projectId)
 
@@ -209,14 +216,16 @@ class GitHubViewModel(
             )
 
             if (clone is Outcome.Failed) {
-                _detail.value = _detail.value.copy(
-                    importing = false,
-                    error = "Clone failed: ${clone.reason}",
-                )
+                _detail.update {
+                    it.copy(
+                        importing = false,
+                        error = "Clone failed: ${clone.reason}",
+                    )
+                }
                 return@launch
             }
 
-            _detail.value = _detail.value.copy(importStage = "Inspecting project")
+            _detail.update { it.copy(importStage = "Inspecting project") }
             val detected = withContext(Dispatchers.IO) { ProjectDetector.detect(target) }
             val project = Project(
                 id = projectId,
@@ -239,12 +248,14 @@ class GitHubViewModel(
             container.projectRepository.register(project)
             container.registerBranch(projectId, repo.defaultBranch)
 
-            _detail.value = _detail.value.copy(
-                importing = false,
-                importStage = "",
-                detected = detected,
-                importedProjectId = projectId,
-            )
+            _detail.update {
+                it.copy(
+                    importing = false,
+                    importStage = "",
+                    detected = detected,
+                    importedProjectId = projectId,
+                )
+            }
         }
     }
 
@@ -260,7 +271,7 @@ class GitHubViewModel(
         val projectPath = container.storage.projectDir(projectId).absolutePath
 
         viewModelScope.launch {
-            _detail.value = _detail.value.copy(testing = true, testResult = null)
+            _detail.update { it.copy(testing = true, testResult = null) }
             val result = container.buildEngine.runAndWait(
                 BuildRequest(
                     projectId = projectId,
@@ -270,7 +281,7 @@ class GitHubViewModel(
                     task = _detail.value.detected?.testTasks?.firstOrNull(),
                 ),
             )
-            _detail.value = _detail.value.copy(testing = false, testResult = result)
+            _detail.update { it.copy(testing = false, testResult = result) }
         }
     }
 
@@ -286,13 +297,15 @@ class GitHubViewModel(
         if (_detail.value.reviewing) return
         val root = container.storage.projectDir(projectId)
         viewModelScope.launch {
-            _detail.value = _detail.value.copy(reviewing = true, review = null, error = null)
+            _detail.update { it.copy(reviewing = true, review = null, error = null) }
             val diff = container.gitService.diff(root)
             if (diff is Outcome.Failed) {
-                _detail.value = _detail.value.copy(
-                    reviewing = false,
-                    error = "Could not read the diff: ${diff.reason}",
-                )
+                _detail.update {
+                    it.copy(
+                        reviewing = false,
+                        error = "Could not read the diff: ${diff.reason}",
+                    )
+                }
                 return@launch
             }
             val text = (diff as Outcome.Ok).value
@@ -304,34 +317,38 @@ class GitHubViewModel(
                     }
                 }
             if (text.isBlank()) {
-                _detail.value = _detail.value.copy(
-                    reviewing = false,
-                    review = "No changes to review yet. Commit or edit a file first.",
-                )
+                _detail.update {
+                    it.copy(
+                        reviewing = false,
+                        review = "No changes to review yet. Commit or edit a file first.",
+                    )
+                }
                 return@launch
             }
             val project = container.projectRepository.getProject(projectId)
             if (project == null) {
-                _detail.value = _detail.value.copy(reviewing = false, error = "Project is no longer registered")
+                _detail.update { it.copy(reviewing = false, error = "Project is no longer registered") }
                 return@launch
             }
             val outcome = container.intelligence.reviewPullRequest(project, text)
-            _detail.value = _detail.value.copy(
-                reviewing = false,
-                review = when (outcome) {
-                    is AiOutcome.Answer -> outcome.text
-                    is AiOutcome.Edits -> outcome.explanation
-                    is AiOutcome.Failure -> "Review failed: ${outcome.reason}"
-                },
-            )
+            _detail.update {
+                it.copy(
+                    reviewing = false,
+                    review = when (outcome) {
+                        is AiOutcome.Answer -> outcome.text
+                        is AiOutcome.Edits -> outcome.explanation
+                        is AiOutcome.Failure -> "Review failed: ${outcome.reason}"
+                    },
+                )
+            }
         }
     }
 
     fun clearReview() {
-        _detail.value = _detail.value.copy(review = null)
+        _detail.update { it.copy(review = null) }
     }
 
     fun clearError() {
-        _detail.value = _detail.value.copy(error = null)
+        _detail.update { it.copy(error = null) }
     }
 }

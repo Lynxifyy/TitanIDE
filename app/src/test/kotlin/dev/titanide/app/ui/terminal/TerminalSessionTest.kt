@@ -245,4 +245,36 @@ class TerminalSessionTest {
         viewModel.newSession()
         assertEquals("closing one frees a slot", 3, viewModel.state.value.sessions.size)
     }
+
+    /**
+     * `clear` only empties the active session. It used to replace the whole session list with
+     * a snapshot taken before the update, so any line another session wrote in between was
+     * thrown away — output from a background command silently disappeared.
+     */
+    @Test
+    fun `clearing one session never drops another session's output`() {
+        val viewModel = newViewModel()
+        viewModel.newSession()
+        val first = viewModel.state.value.sessions[0].id
+        val second = viewModel.state.value.sessions[1].id
+        viewModel.selectSession(0)
+
+        val expected = 2000
+        val writer = kotlin.concurrent.thread {
+            repeat(expected) {
+                viewModel.appendTo(second, TerminalLine("bg $it"))
+                if (it % 8 == 0) Thread.yield()
+            }
+        }
+        repeat(2000) { viewModel.clear() }
+        writer.join()
+
+        assertEquals(
+            "every line the background session wrote must still be there",
+            expected,
+            viewModel.state.value.sessions[1].lines.size,
+        )
+        assertEquals("clear must still empty the session it was called on", 0, viewModel.state.value.sessions[0].lines.size)
+        assertTrue("the first session id must be stable", first != second)
+    }
 }

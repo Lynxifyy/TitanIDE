@@ -485,7 +485,7 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
     // ----------------------------------------------------------------- find in file
 
     fun openFind(replaceMode: Boolean = false) {
-        _find.value = _find.value.copy(open = true, replaceMode = replaceMode)
+        _find.update { it.copy(open = true, replaceMode = replaceMode) }
     }
 
     fun closeFind() {
@@ -499,12 +499,12 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
         // Keep the user near where they were: prefer the first match at or after the caret.
         val caret = active?.let { _buffers.value[it]?.caret } ?: 0
         val start = matches.indexOfFirst { it.first >= caret }.coerceAtLeast(0)
-        _find.value = _find.value.copy(query = query, matches = matches, activeIndex = start)
+        _find.update { it.copy(query = query, matches = matches, activeIndex = start) }
         active?.let { path -> matches.getOrNull(start)?.let { moveCaretTo(path, it.first) } }
     }
 
     fun setFindReplacement(text: String) {
-        _find.value = _find.value.copy(replacement = text)
+        _find.update { it.copy(replacement = text) }
     }
 
     fun findNext() {
@@ -532,7 +532,7 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
         edit(path, updated)
         val matches = matchRanges(updated, _find.value.query)
         val next = matches.indexOfFirst { it.first > match.first }.coerceAtLeast(0)
-        _find.value = _find.value.copy(matches = matches, activeIndex = next)
+        _find.update { it.copy(matches = matches, activeIndex = next) }
         matches.getOrNull(next)?.let { moveCaretTo(path, it.first) }
     }
 
