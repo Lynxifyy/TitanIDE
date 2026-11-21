@@ -2,6 +2,7 @@ package dev.titanide.app.ui.workbench
 
 import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.core.model.Diagnostic
 import dev.titanide.core.model.Language
 import dev.titanide.core.model.ProjectCategory
 import dev.titanide.core.model.Severity
@@ -311,11 +312,107 @@ class WorkbenchViewModelTest {
 
         viewModel.createFile("src/Temp.kt")
         withTimeout(10_000) { viewModel.buffers.first { it.containsKey("src/Temp.kt") } }
+        // openFile publishes the buffer and the tab separately, so awaiting the buffer does not
+        // imply the tab exists yet.
+        withTimeout(10_000) { viewModel.state.first { it.activeTab?.path == "src/Temp.kt" } }
         assertNotNull(viewModel.state.value.activeTab)
 
         viewModel.closeTab("src/Temp.kt")
         assertFalse(viewModel.buffers.value.containsKey("src/Temp.kt"))
         assertNull(viewModel.state.value.activeTab)
+    }
+
+    /**
+     * The diagnostics panel follows the active tab. It used to be a single list that only an
+     * analysis pass could replace, so switching to a file that was not re-analysed showed the
+     * previous file's errors under the new file's name.
+     */
+    @Test
+    fun `switching tabs swaps in that file's diagnostics`() = runBlocking {
+        val id = scaffoldProject("bench-diag-switch")
+        val viewModel = WorkbenchViewModel(container)
+        viewModel.awaitProject(id)
+
+        val files = withTimeout(10_000) {
+            viewModel.projectTree.first { tree ->
+                tree.flattened().count { !it.isDirectory && it.path.endsWith(".kt") } >= 2
+            }
+        }.flattened().filter { !it.isDirectory && it.path.endsWith(".kt") }.map { it.path }
+        val first = files[0]
+        val second = files[1]
+
+        viewModel.openFile(first)
+        withTimeout(10_000) { viewModel.buffers.first { it.containsKey(first) } }
+        // An unbalanced brace is a CodeGuard error, so this file reports a diagnostic.
+        viewModel.edit(first, viewModel.buffers.value.getValue(first).content + "\nfun broken() {\n")
+        val firstDiags = withTimeout(10_000) {
+            viewModel.diagnostics.first { list -> list.any { it.severity == Severity.ERROR } }
+        }
+        assertTrue("the edited file should report an error", firstDiags.isNotEmpty())
+
+        viewModel.openFile(second)
+        withTimeout(10_000) { viewModel.buffers.first { it.containsKey(second) } }
+        withTimeout(10_000) { viewModel.diagnostics.first { it.isEmpty() } }
+        assertEquals(
+            "the clean file must not show the other file's errors",
+            0,
+            viewModel.diagnostics.value.size,
+        )
+
+        viewModel.activateTab(first)
+        val back = withTimeout(10_000) { viewModel.diagnostics.first { it.isNotEmpty() } }
+        assertEquals("returning to the broken file must bring its errors back", firstDiags.size, back.size)
+    }
+
+    /**
+     * Analysis is debounced, but a slow analysis that has already started is not cancelled by
+     * the next edit, so two can overlap. The older one used to publish last, leaving an error on
+     * screen after the line was fixed. The analyser is injected so the first call is much slower
+     * than the second, which makes the ordering deterministic rather than a race.
+     */
+    @Test
+    fun `a stale analysis cannot overwrite newer diagnostics`() = runBlocking {
+        val id = scaffoldProject("bench-diag-stale")
+        val calls = java.util.concurrent.atomic.AtomicInteger()
+        val viewModel = WorkbenchViewModel(container) { _, _, path ->
+            if (calls.getAndIncrement() == 0) {
+                // Slow enough to still be running when the second analysis finishes.
+                Thread.sleep(1_500)
+                listOf(
+                    Diagnostic(
+                        filePath = path,
+                        line = 1,
+                        column = 1,
+                        severity = Severity.ERROR,
+                        message = "stale",
+                        source = "test",
+                    ),
+                )
+            } else {
+                emptyList()
+            }
+        }
+        viewModel.awaitProject(id)
+
+        val path = viewModel.firstKotlinFile()
+        viewModel.openFile(path)
+        withTimeout(10_000) { viewModel.buffers.first { it.containsKey(path) } }
+
+        // Past the 350 ms debounce, so the slow analysis has started, then edit again.
+        viewModel.edit(path, viewModel.buffers.value.getValue(path).content + "\n")
+        kotlinx.coroutines.delay(600)
+        viewModel.edit(path, viewModel.buffers.value.getValue(path).content + "\n")
+
+        withTimeout(10_000) {
+            viewModel.diagnostics.first { list -> list.none { it.severity == Severity.ERROR } }
+        }
+        // Outlive the slow analysis so its late result has every chance to land.
+        kotlinx.coroutines.delay(1_500)
+        assertEquals(
+            "the slow analysis of older text must not replace the newer clean result",
+            0,
+            viewModel.diagnostics.value.count { it.severity == Severity.ERROR },
+        )
     }
 }
 

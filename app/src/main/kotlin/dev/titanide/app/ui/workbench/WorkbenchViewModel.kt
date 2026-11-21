@@ -95,7 +95,13 @@ data class FindState(
  * through CodeGuard, real builds through the shared BuildEngine, and the real OpenCode
  * session. The Compose layer only renders this state and forwards intents.
  */
-class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
+class WorkbenchViewModel(
+    private val container: TitanContainer,
+    /** Seam for tests that need to control how long analysis takes. */
+    private val analyzer: (String, Language, String) -> List<Diagnostic> = { text, language, path ->
+        CodeGuard().analyze(text, language, path)
+    },
+) : ViewModel() {
 
     private val _state = MutableStateFlow(WorkbenchState())
     val state: StateFlow<WorkbenchState> = _state.asStateFlow()
@@ -113,6 +119,17 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
     val projectTree: StateFlow<List<ProjectNode>> = _projectTree.asStateFlow()
 
     private val _diagnostics = MutableStateFlow<List<Diagnostic>>(emptyList())
+
+    // Analysis runs off the main thread, one coroutine per keystroke. Without a sequence number
+    // a slower analysis of older text can finish last and publish diagnostics for a line the
+    // user has already fixed, so errors appear to stick.
+    private val analyzeGeneration = java.util.concurrent.atomic.AtomicLong()
+    private val analyzeJobs = mutableMapOf<String, Job>()
+
+    // _diagnostics is the panel for the active tab. Keeping the per-file results means
+    // switching tabs shows that file's problems instead of the ones the panel happened to
+    // hold last, and it does not need a second analysis pass to do it.
+    private val diagnosticsByPath = java.util.concurrent.ConcurrentHashMap<String, List<Diagnostic>>()
     val diagnostics: StateFlow<List<Diagnostic>> = _diagnostics.asStateFlow()
 
     private val _expanded = MutableStateFlow<Set<String>>(emptySet())
@@ -295,6 +312,8 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
     fun closeTab(tabId: String) {
         _state.value = _state.value.closeTab(tabId)
         _buffers.value = _buffers.value - tabId
+        diagnosticsByPath.remove(tabId)
+        analyzeJobs.remove(tabId)?.cancel()
         _state.value.activeTab?.path?.let(::publishActive)
     }
 
@@ -311,8 +330,10 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
             content = buffer.content,
             language = buffer.language.id,
         )
-        val errors = _diagnostics.value.count { it.severity == Severity.ERROR }
-        val warnings = _diagnostics.value.count { it.severity == Severity.WARNING }
+        val own = diagnosticsByPath[path].orEmpty()
+        _diagnostics.value = own
+        val errors = own.count { it.severity == Severity.ERROR }
+        val warnings = own.count { it.severity == Severity.WARNING }
         _state.update {
             it.copy(
                 status = it.status.copy(
@@ -456,19 +477,27 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
 
     private fun analyze(buffer: BufferState) {
         if (!(container.currentSettings()?.editor?.codeGuardEnabled ?: true)) {
+            analyzeJobs.remove(buffer.path)?.cancel()
+            diagnosticsByPath.remove(buffer.path)
             _diagnostics.value = emptyList()
             return
         }
-        // Analysis tokenizes the whole buffer; running it inline would stall typing.
-        viewModelScope.launch {
+        // Analysis tokenizes the whole buffer; running it inline would stall typing. The newest
+        // request wins: an older job is cancelled, and the generation check drops its result if
+        // it had already finished computing.
+        val generation = analyzeGeneration.incrementAndGet()
+        analyzeJobs.remove(buffer.path)?.cancel()
+        analyzeJobs[buffer.path] = viewModelScope.launch {
             val found = withContext(Dispatchers.Default) {
-                CodeGuard().analyze(buffer.content, buffer.language, buffer.path)
+                analyzer(buffer.content, buffer.language, buffer.path)
             }
+            if (generation != analyzeGeneration.get()) return@launch
             applyDiagnostics(buffer, found)
         }
     }
 
     private fun applyDiagnostics(buffer: BufferState, found: List<Diagnostic>) {
+        diagnosticsByPath[buffer.path] = found
         if (_state.value.activeTab?.path == buffer.path) {
             _diagnostics.value = found
             _state.update {
