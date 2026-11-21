@@ -61,7 +61,12 @@ object TitanRoutes {
     const val GIT = "git"
     const val TOOLS = "tools"
 
+    const val EDITOR_ROUTE = "editor"
+    const val EDITOR_WITH_PROJECT = "editor?projectId={projectId}"
+
     fun projectDetail(id: String) = "$PROJECT_DETAIL/$id"
+    fun editor(projectId: String? = null) =
+        if (projectId.isNullOrEmpty()) EDITOR_ROUTE else "$EDITOR_ROUTE?projectId=$projectId"
     fun githubRepo(fullName: String) = "$GITHUB_REPO/${fullName.replace('/', ':')}"
     fun build(projectId: String) = "$BUILD/$projectId"
     fun git(projectId: String) = "$GIT/$projectId"

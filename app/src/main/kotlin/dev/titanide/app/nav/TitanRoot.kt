@@ -20,6 +20,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -208,9 +209,18 @@ private fun NavGraphBuilder.primaryDestinations(navController: NavHostController
             onOpenGitHub = { navController.navigate(TitanRoutes.GITHUB) },
         )
     }
-    composable(TitanDestination.EDITOR.route) {
+    composable(
+        route = TitanRoutes.EDITOR_WITH_PROJECT,
+        arguments = listOf(navArgument("projectId") { type = NavType.StringType; defaultValue = "" }),
+    ) { entry ->
+        val projectId = entry.arguments?.getString("projectId").orEmpty()
         val container = LocalContainer.current
         val workbench: WorkbenchViewModel = viewModel { WorkbenchViewModel(container) }
+        // The view model otherwise guesses from lastOpenedAt, which races the detail screen's
+        // fire-and-forget touch and can open the project the user did not pick.
+        LaunchedEffect(projectId) {
+            if (projectId.isNotEmpty()) workbench.openProject(projectId)
+        }
         WorkbenchScreen(
             viewModel = workbench,
             onOpenSettings = { navController.navigate(TitanDestination.SETTINGS.route) },
@@ -245,7 +255,7 @@ private fun NavGraphBuilder.detailDestinations(navController: NavHostController)
         ProjectDetailScreen(
             projectId = projectId,
             onBack = { navController.popBackStack() },
-            onOpenEditor = { navController.navigate(TitanDestination.EDITOR.route) },
+            onOpenEditor = { navController.navigate(TitanRoutes.editor(projectId)) },
             onBuild = { navController.navigate(TitanRoutes.build(projectId)) },
             onGit = { navController.navigate(TitanRoutes.git(projectId)) },
         )

@@ -44,6 +44,17 @@ class TitanRoutesTest {
     }
 
     @Test
+    fun `editor route carries the project the user chose`() {
+        assertEquals("editor?projectId=abc-123", TitanRoutes.editor("abc-123"))
+    }
+
+    @Test
+    fun `editor route without a project stays plain`() {
+        assertEquals(TitanDestination.EDITOR.route, TitanRoutes.editor())
+        assertEquals(TitanDestination.EDITOR.route, TitanRoutes.editor(""))
+    }
+
+    @Test
     fun `build route takes an optional project id`() {
         assertEquals("build?projectId={projectId}", TitanRoutes.BUILD)
     }
