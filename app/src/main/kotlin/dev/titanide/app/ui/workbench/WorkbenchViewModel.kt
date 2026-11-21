@@ -577,13 +577,98 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
         }
     }
 
+    fun createDirectory(path: String) {
+        val project = _project.value ?: return
+        viewModelScope.launch {
+            when (val result = container.fileTreeRepository.createDirectory(project, path)) {
+                is SafeFileSystem.Result.Ok -> {
+                    refreshFiles()
+                    _expanded.value = _expanded.value + path
+                    _message.value = "Created $path"
+                }
+
+                is SafeFileSystem.Result.Failure -> _message.value = result.reason
+            }
+        }
+    }
+
+    /**
+     * Renames or moves a file or directory.
+     *
+     * A buffer with unsaved edits is carried over to the new path rather than dropped: the
+     * alternative is to write the stale saved text over the moved file, or to lose the
+     * edits, and both are silent data loss.
+     */
+    fun renamePath(from: String, to: String) {
+        val project = _project.value ?: return
+        if (from == to) return
+        viewModelScope.launch {
+            when (val result = container.fileTreeRepository.move(project, from, to)) {
+                is SafeFileSystem.Result.Ok -> {
+                    moveBuffers(from, to)
+                    refreshFiles()
+                    _message.value = "Renamed to $to"
+                }
+
+                is SafeFileSystem.Result.Failure -> _message.value = result.reason
+            }
+        }
+    }
+
+    /** Copies a path, refusing to overwrite an existing file. */
+    fun duplicatePath(from: String, to: String) {
+        val project = _project.value ?: return
+        viewModelScope.launch {
+            when (val result = container.fileTreeRepository.copy(project, from, to)) {
+                is SafeFileSystem.Result.Ok -> {
+                    refreshFiles()
+                    _message.value = "Copied to $to"
+                }
+
+                is SafeFileSystem.Result.Failure -> _message.value = result.reason
+            }
+        }
+    }
+
+    /** True when [path] has edits that are not on disk, so the UI can warn before losing them. */
+    fun hasUnsavedChanges(path: String): Boolean {
+        val buffer = _buffers.value[path] ?: return false
+        return buffer.content != buffer.savedContent
+    }
+
+    private fun moveBuffers(from: String, to: String) {
+        val moved = _buffers.value.filterKeys { it == from || it.startsWith("$from/") }
+        if (moved.isEmpty()) {
+            _state.value.activeGroup.tabs
+                .firstOrNull { it.path == from }
+                ?.let { tab -> _state.value = _state.value.closeTab(tab.id) }
+            return
+        }
+        _buffers.value = _buffers.value - moved.keys
+        moved.forEach { (oldPath, buffer) ->
+            val newPath = to + oldPath.removePrefix(from)
+            _buffers.value = _buffers.value + (newPath to buffer.copy(path = newPath))
+        }
+        val active = _state.value.activeTab?.path
+        if (active != null && (active == from || active.startsWith("$from/"))) {
+            val newActive = to + active.removePrefix(from)
+            _state.value = _state.value.closeTab(active).openFile(
+                path = newActive,
+                languageId = LanguageDetector.detect(newActive),
+            )
+            publishActive(newActive)
+        }
+    }
+
     fun deleteFile(path: String) {
         val project = _project.value ?: return
         viewModelScope.launch {
             when (val result = container.fileTreeRepository.delete(project, path)) {
                 is SafeFileSystem.Result.Ok -> {
-                    _buffers.value = _buffers.value - path
-                    _state.value = _state.value.closeTab(path)
+                    // A directory delete takes its children with it, so their buffers go too.
+                    val doomed = _buffers.value.keys.filter { it == path || it.startsWith("$path/") }
+                    _buffers.value = _buffers.value - doomed.toSet()
+                    doomed.forEach { _state.value = _state.value.closeTab(it) }
                     refreshFiles()
                     _message.value = "Deleted $path"
                 }

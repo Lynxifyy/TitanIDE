@@ -99,7 +99,7 @@ fun WorkbenchScreen(
     val currentBuildLogs = remember(logs, build) { build?.logLines ?: logs.values.lastOrNull() ?: emptyList() }
     val modifiedPaths = remember(buffers) { buffers.filterValues { it.dirty }.keys }
 
-    var showNewFileDialog by remember { mutableStateOf(false) }
+    var prompt by remember { mutableStateOf<NamePrompt?>(null) }
 
     Box(
         modifier = modifier
@@ -150,9 +150,12 @@ fun WorkbenchScreen(
                         onOpenFile = viewModel::openFile,
                         onOpenHit = { hit -> viewModel.openFile(hit.path) },
                         onSearch = viewModel::search,
-                        onNewFile = { showNewFileDialog = true },
+                        onNewFile = { prompt = NamePrompt.NewFile },
+                        onNewFolder = { prompt = NamePrompt.NewFolder },
                         onRefresh = viewModel::refreshFiles,
-                        onDelete = { node -> viewModel.deleteFile(node.path) },
+                        onDelete = { node -> prompt = NamePrompt.Delete(node.path) },
+                        onRename = { node -> prompt = NamePrompt.Rename(node.path) },
+                        onDuplicate = { node -> prompt = NamePrompt.Duplicate(node.path) },
                         onToggleAndroidView = viewModel::toggleAndroidView,
                         onOpenProject = onOpenProjects,
                         build = build,
@@ -263,7 +266,7 @@ fun WorkbenchScreen(
             onBuild = { viewModel.runBuild(BuildKind.BUILD) },
             onTest = { viewModel.runBuild(BuildKind.TEST) },
             onToggleAgent = viewModel::toggleAgentPanel,
-            onNewFile = { showNewFileDialog = true },
+            onNewFile = { prompt = NamePrompt.NewFile },
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 10.dp, bottom = 30.dp),
         )
 
@@ -294,9 +297,12 @@ fun WorkbenchScreen(
                     onOpenFile = viewModel::openFile,
                     onOpenHit = { hit -> viewModel.openFile(hit.path) },
                     onSearch = viewModel::search,
-                    onNewFile = { showNewFileDialog = true },
+                    onNewFile = { prompt = NamePrompt.NewFile },
+                    onNewFolder = { prompt = NamePrompt.NewFolder },
                     onRefresh = viewModel::refreshFiles,
-                    onDelete = { node -> viewModel.deleteFile(node.path) },
+                    onDelete = { node -> prompt = NamePrompt.Delete(node.path) },
+                    onRename = { node -> prompt = NamePrompt.Rename(node.path) },
+                    onDuplicate = { node -> prompt = NamePrompt.Duplicate(node.path) },
                     onToggleAndroidView = viewModel::toggleAndroidView,
                     onOpenProject = onOpenProjects,
                     build = build,
@@ -346,12 +352,20 @@ fun WorkbenchScreen(
         }
     }
 
-    if (showNewFileDialog) {
-        NewFileDialog(
-            onDismiss = { showNewFileDialog = false },
-            onCreate = { path ->
-                showNewFileDialog = false
-                viewModel.createFile(path)
+    prompt?.let { current ->
+        NamePromptDialog(
+            prompt = current,
+            hasUnsavedChanges = (current as? NamePrompt.Delete)?.let { viewModel.hasUnsavedChanges(it.path) } == true,
+            onDismiss = { prompt = null },
+            onConfirm = { value ->
+                prompt = null
+                when (current) {
+                    NamePrompt.NewFile -> viewModel.createFile(value)
+                    NamePrompt.NewFolder -> viewModel.createDirectory(value)
+                    is NamePrompt.Rename -> viewModel.renamePath(current.path, value)
+                    is NamePrompt.Duplicate -> viewModel.duplicatePath(current.path, value)
+                    is NamePrompt.Delete -> viewModel.deleteFile(current.path)
+                }
             },
         )
     }
@@ -419,8 +433,11 @@ private fun SidebarHost(
     onOpenHit: (SearchHit) -> Unit,
     onSearch: (String) -> Unit,
     onNewFile: () -> Unit,
+    onNewFolder: () -> Unit,
     onRefresh: () -> Unit,
     onDelete: (dev.titanide.core.workbench.ProjectNode) -> Unit,
+    onRename: (dev.titanide.core.workbench.ProjectNode) -> Unit,
+    onDuplicate: (dev.titanide.core.workbench.ProjectNode) -> Unit,
     onToggleAndroidView: () -> Unit,
     onOpenProject: () -> Unit,
     build: BuildResult?,
@@ -470,8 +487,11 @@ private fun SidebarHost(
                     onToggle = onToggleExpanded,
                     onOpen = { node -> if (!node.isDirectory) onOpenFile(node.path) },
                     onCreateFile = onNewFile,
+                    onCreateFolder = onNewFolder,
                     onRefresh = onRefresh,
                     onDelete = onDelete,
+                    onRename = onRename,
+                    onDuplicate = onDuplicate,
                     emptyDetail = if (androidTree.isEmpty() && projectTree.isEmpty()) {
                         "This project has no files yet. Create one to get started."
                     } else {
@@ -599,33 +619,96 @@ private fun QuickActionButton(
     }
 }
 
+/**
+ * What the explorer is asking for. A sealed type rather than a flag per dialog: the
+ * confirm action differs per case, and a single dialog keeps the phone layout short.
+ */
+private sealed interface NamePrompt {
+    data object NewFile : NamePrompt
+    data object NewFolder : NamePrompt
+    data class Rename(val path: String) : NamePrompt
+    data class Duplicate(val path: String) : NamePrompt
+    data class Delete(val path: String) : NamePrompt
+}
+
+private val NamePrompt.title: String
+    get() = when (this) {
+        NamePrompt.NewFile -> "New file"
+        NamePrompt.NewFolder -> "New folder"
+        is NamePrompt.Rename -> "Rename or move"
+        is NamePrompt.Duplicate -> "Duplicate"
+        is NamePrompt.Delete -> "Delete"
+    }
+
+private fun NamePrompt.hint(hasUnsavedChanges: Boolean): String = when (this) {
+    NamePrompt.NewFile -> "Enter a project-relative path, for example src/Main.kt"
+    NamePrompt.NewFolder -> "Enter a project-relative path, for example src/feature"
+    is NamePrompt.Rename -> "New path. Directories may be moved by changing the folder."
+    is NamePrompt.Duplicate -> "Path for the copy. It must not already exist."
+    is NamePrompt.Delete -> if (hasUnsavedChanges) {
+        "This removes the file from disk, and it has unsaved edits. Neither can be recovered."
+    } else {
+        "This removes the file from disk. It cannot be undone."
+    }
+}
+
+private val NamePrompt.initial: String
+    get() = when (this) {
+        NamePrompt.NewFile, NamePrompt.NewFolder -> ""
+        is NamePrompt.Rename -> path
+        is NamePrompt.Duplicate -> path
+        is NamePrompt.Delete -> path
+    }
+
+private val NamePrompt.confirmLabel: String
+    get() = when (this) {
+        NamePrompt.NewFile -> "Create"
+        NamePrompt.NewFolder -> "Create"
+        is NamePrompt.Rename -> "Rename"
+        is NamePrompt.Duplicate -> "Copy"
+        is NamePrompt.Delete -> "Delete"
+    }
+
 @Composable
-private fun NewFileDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
-    var path by remember { mutableStateOf("") }
+private fun NamePromptDialog(
+    prompt: NamePrompt,
+    hasUnsavedChanges: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var value by remember(prompt) { mutableStateOf(prompt.initial) }
+    val isDelete = prompt is NamePrompt.Delete
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("New file", style = MaterialTheme.typography.titleMedium) },
+        title = { Text(prompt.title, style = MaterialTheme.typography.titleMedium) },
         text = {
             Column {
                 Text(
-                    text = "Enter a project-relative path, for example src/Main.kt",
-                    color = TitanColors.TextMuted,
+                    text = prompt.hint(hasUnsavedChanges),
+                    color = if (isDelete && hasUnsavedChanges) TitanColors.Error else TitanColors.TextMuted,
                     style = MaterialTheme.typography.bodySmall,
                 )
-                Spacer(Modifier.height(8.dp))
-                SearchField(
-                    value = path,
-                    onValueChange = { path = it },
-                    placeholder = "src/Main.kt",
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                if (!isDelete) {
+                    Spacer(Modifier.height(8.dp))
+                    SearchField(
+                        value = value,
+                        onValueChange = { value = it },
+                        placeholder = "src/Main.kt",
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { if (path.isNotBlank()) onCreate(path.trim()) },
-                enabled = path.isNotBlank(),
-            ) { Text("Create") }
+                onClick = { onConfirm(value.trim()) },
+                enabled = isDelete || value.isNotBlank(),
+            ) {
+                Text(
+                    prompt.confirmLabel,
+                    color = if (isDelete) TitanColors.Error else TitanColors.Primary,
+                )
+            }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
         containerColor = TitanColors.Surface,

@@ -1,7 +1,9 @@
 package dev.titanide.app.ui.workbench
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,13 +20,19 @@ import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -96,8 +104,11 @@ fun FileTree(
     onToggle: (String) -> Unit,
     onOpen: (ProjectNode) -> Unit,
     onCreateFile: () -> Unit,
+    onCreateFolder: () -> Unit,
     onRefresh: () -> Unit,
     onDelete: (ProjectNode) -> Unit,
+    onRename: (ProjectNode) -> Unit = {},
+    onDuplicate: (ProjectNode) -> Unit = {},
     modifier: Modifier = Modifier,
     emptyDetail: String = "No files in this project yet.",
 ) {
@@ -106,7 +117,7 @@ fun FileTree(
     androidx.compose.foundation.layout.Column(modifier = modifier.fillMaxWidth()) {
         PanelHeader(title = "Explorer") {
             DenseIconButton(Icons.Filled.Add, "New file", onCreateFile)
-            DenseIconButton(Icons.Filled.CreateNewFolder, "New folder", onCreateFile)
+            DenseIconButton(Icons.Filled.CreateNewFolder, "New folder", onCreateFolder)
             DenseIconButton(Icons.Filled.Refresh, "Refresh", onRefresh)
         }
         if (rows.isEmpty()) {
@@ -125,6 +136,8 @@ fun FileTree(
                         onToggle = { onToggle(row.node.path) },
                         onOpen = { onOpen(row.node) },
                         onDelete = { onDelete(row.node) },
+                        onRename = { onRename(row.node) },
+                        onDuplicate = { onDuplicate(row.node) },
                     )
                 }
             }
@@ -132,6 +145,7 @@ fun FileTree(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TreeRowView(
     row: TreeRow,
@@ -140,14 +154,20 @@ private fun TreeRowView(
     onToggle: () -> Unit,
     onOpen: () -> Unit,
     onDelete: () -> Unit,
+    onRename: () -> Unit,
+    onDuplicate: () -> Unit,
 ) {
     val node = row.node
+    var menuOpen by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(WorkbenchMetrics.RowHeight)
             .background(if (isActive) TitanColors.SurfaceHigh else Color.Transparent)
-            .clickable { if (node.isDirectory) onToggle() else onOpen() }
+            .combinedClickable(
+                onClick = { if (node.isDirectory) onToggle() else onOpen() },
+                onLongClick = { menuOpen = true },
+            )
             .padding(start = (row.depth * 12).dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -195,6 +215,37 @@ private fun TreeRowView(
                 onClick = onDelete,
                 tint = TitanColors.TextMuted.copy(alpha = 0.6f),
             )
+        }
+        Box {
+            DenseIconButton(
+                icon = Icons.Filled.MoreVert,
+                contentDescription = "Actions for ${node.name}",
+                onClick = { menuOpen = true },
+                tint = TitanColors.TextMuted.copy(alpha = 0.6f),
+            )
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text("Rename or move", fontSize = 11.sp) },
+                    onClick = {
+                        menuOpen = false
+                        onRename()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Duplicate", fontSize = 11.sp) },
+                    onClick = {
+                        menuOpen = false
+                        onDuplicate()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Delete", fontSize = 11.sp, color = TitanColors.Error) },
+                    onClick = {
+                        menuOpen = false
+                        onDelete()
+                    },
+                )
+            }
         }
     }
 }
