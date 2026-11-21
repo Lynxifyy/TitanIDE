@@ -8,6 +8,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -99,7 +101,12 @@ fun WorkbenchScreen(
         modifier = modifier
             .fillMaxSize()
             .background(TitanColors.Canvas)
-            .windowInsetsPadding(WindowInsets.statusBars),
+            // statusBars for the top chrome, navigationBars so the status bar row is not
+            // hidden behind the gesture bar, and ime so the software keyboard pushes the
+            // editor and terminal input up instead of covering them.
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .windowInsetsPadding(WindowInsets.navigationBars)
+            .imePadding(),
     ) {
         Column(Modifier.fillMaxSize()) {
             WorkbenchTitleBar(

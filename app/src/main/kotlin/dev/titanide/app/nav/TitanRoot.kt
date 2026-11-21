@@ -2,8 +2,14 @@ package dev.titanide.app.nav
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -86,12 +92,16 @@ private fun AdaptiveShell(
     val useRail = windowWidth >= 720.dp
 
     if (!showChrome) {
+        // Full-bleed surfaces (the workbench) apply their own insets, so the shell must not
+        // add a second layer of padding here.
         Surface(color = TitanColors.Canvas, modifier = Modifier.fillMaxSize()) { content() }
         return
     }
 
     if (useRail) {
-        Row(modifier = Modifier.fillMaxSize()) {
+        val railInsets = WindowInsets.statusBars.union(WindowInsets.displayCutout)
+        val contentInsets = WindowInsets.navigationBars.union(WindowInsets.displayCutout)
+        Row(modifier = Modifier.fillMaxSize().windowInsetsPadding(railInsets)) {
             NavigationRail(containerColor = TitanColors.CanvasElevated) {
                 TitanDestination.primary.forEach { destination ->
                     NavigationRailItem(
@@ -118,7 +128,7 @@ private fun AdaptiveShell(
                     )
                 }
             }
-            Box(modifier = Modifier.fillMaxSize()) { content() }
+            Box(modifier = Modifier.fillMaxSize().windowInsetsPadding(contentInsets)) { content() }
         }
     } else {
         Scaffold(
@@ -151,9 +161,9 @@ private fun AdaptiveShell(
                 }
             },
         ) { padding ->
-            Box(modifier = Modifier.fillMaxSize().padding(bottom = padding.calculateBottomPadding())) {
-                content()
-            }
+            // Apply every inset the Scaffold reports. Using only the bottom value left the
+            // status bar overlapping the first row of content on edge-to-edge devices.
+            Box(modifier = Modifier.fillMaxSize().padding(padding)) { content() }
         }
     }
 }

@@ -89,7 +89,12 @@ fun AiStudioScreen(onOpenSettings: () -> Unit) {
                     Text("No AI provider configured", style = MaterialTheme.typography.titleSmall, color = TitanColors.TextPrimary)
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "Add an endpoint and key in Settings, or point TITAN at a local model such as Ollama. " +
+                        "Three ways to enable AI, in order of effort:\n" +
+                            "1. Local model, no key: run Ollama or LM Studio, then set its URL " +
+                            "(http://127.0.0.1:11434/v1 for Ollama) in Settings.\n" +
+                            "2. Cloud key: add an OpenAI-compatible or Anthropic endpoint and key.\n" +
+                            "3. No setup at all: the OpenCode agent in the workbench needs no key here " +
+                            "because it runs on a machine you point TITAN at.\n" +
                             "Nothing is sent anywhere until you configure a provider.",
                         style = MaterialTheme.typography.bodySmall,
                         color = TitanColors.TextMuted,
