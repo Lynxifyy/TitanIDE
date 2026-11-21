@@ -140,6 +140,19 @@ fun AgentPanel(
                             .padding(horizontal = 10.dp, vertical = 4.dp),
                     )
                 }
+                state.notice?.let { notice ->
+                    Text(
+                        text = notice,
+                        color = TitanColors.Warning,
+                        fontSize = 10.sp,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(TitanColors.Warning.copy(alpha = 0.1f))
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                    )
+                }
             }
         }
     }

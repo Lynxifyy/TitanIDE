@@ -7,6 +7,7 @@ import dev.titanide.core.opencode.model.FileDiff
 import dev.titanide.core.opencode.model.ListEnvelope
 import dev.titanide.core.opencode.model.MessageEnvelope
 import dev.titanide.core.opencode.model.ModelInfo
+import dev.titanide.core.opencode.model.MoveSessionBody
 import dev.titanide.core.opencode.model.PermissionReplyBody
 import dev.titanide.core.opencode.model.PermissionRequest
 import dev.titanide.core.opencode.model.PromptBody
@@ -89,6 +90,22 @@ class OpenCodeClient(
 
     suspend fun deleteSession(sessionId: String) {
         delete("/api/session/$sessionId")
+    }
+
+    /**
+     * Binds a session to a project directory on the server.
+     *
+     * `POST /api/session` has no directory field, so a newly created session runs wherever
+     * the server was started. This is the documented way to point it at a project, and it
+     * is what makes "the agent edits the same files the build uses" true.
+     */
+    suspend fun moveSession(sessionId: String, directory: String) {
+        post(
+            path = "/api/session/$sessionId/move",
+            body = MoveSessionBody(directory = directory),
+            bodySerializer = MoveSessionBody.serializer(),
+            responseSerializer = JsonObject.serializer(),
+        )
     }
 
     /** Sends a user turn. This is the spec's prompt endpoint, not a message POST. */
@@ -190,12 +207,21 @@ class OpenCodeClient(
         }
     }
 
+    /**
+     * Error envelopes in the spec are `{_tag, message}`; a plain `{error: "..."}` is also
+     * common from proxies in front of the server. Both are read so the user sees the
+     * server's own reason rather than a bare status code.
+     */
     private fun httpErrorMessage(code: Int, body: String): String {
         val detail = runCatching {
             val obj = json.parseToJsonElement(body).jsonObject
-            val err = obj["error"]?.jsonObject
-            err?.get("message")?.toString()?.trim('"')
-                ?: obj["message"]?.toString()?.trim('"')
+            fun primitive(key: String): String? =
+                (obj[key] as? kotlinx.serialization.json.JsonPrimitive)
+                    ?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
+            val err = obj["error"] as? JsonObject
+            err?.get("message")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
+                ?: primitive("message")
+                ?: primitive("error")
         }.getOrNull()
         return "OpenCode returned HTTP $code" + if (detail != null) ": $detail" else "."
     }

@@ -161,6 +161,16 @@ data class CreateSessionBody(
     val model: ModelRef? = null,
 )
 
+/**
+ * Body for `POST /api/session/{id}/move`. The session is rebound to [directory] on the
+ * machine running the server; the create call cannot do this.
+ */
+@Serializable
+data class MoveSessionBody(
+    val directory: String,
+    val delivery: String? = null,
+)
+
 /** Body for `POST /api/session/{id}/prompt`. `text` is the only required field. */
 @Serializable
 data class PromptBody(

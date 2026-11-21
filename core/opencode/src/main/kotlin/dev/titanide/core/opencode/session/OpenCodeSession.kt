@@ -35,6 +35,13 @@ data class OpenCodeState(
     val pendingPermissions: List<PermissionRequest> = emptyList(),
     val changedFiles: List<FileDiff> = emptyList(),
     val lastError: String? = null,
+    /**
+     * A setup problem the user should know about that does not stop the conversation, such
+     * as the agent running in a different directory than requested. Kept separate from
+     * [lastError] because a successful refresh clears that one, which would erase this
+     * within a single poll.
+     */
+    val notice: String? = null,
 ) {
     val isConnected: Boolean get() = connection is OpenCodeConnection.Connected
     val toolCalls: List<AgentActivity.ToolCall> get() = activity.filterIsInstance<AgentActivity.ToolCall>()
@@ -51,8 +58,9 @@ data class OpenCodeState(
  *  2. Approvals are forwarded to the server via `permission.reply`, so the server's own
  *     policy engine — not TITAN — decides whether a destructive action is allowed.
  *
- * The project directory is passed on session creation and is the same directory the build
- * engine uses, which is what makes "agent edits a file, then the build sees it" true.
+ * The project directory is bound with `session.move` after the session is opened — the
+ * create call has no directory field — and is the same directory the build engine uses,
+ * which is what makes "agent edits a file, then the build sees it" true.
  */
 class OpenCodeSession(
     private val scope: CoroutineScope,
@@ -65,7 +73,20 @@ class OpenCodeSession(
 
     private var client: OpenCodeClient? = null
     private var pollJob: Job? = null
+    private var eventJob: Job? = null
     private var serverUrl: String = ""
+
+    /**
+     * Set when the event stream reports anything for this session.
+     *
+     * The stream is only a trigger: the messages themselves still come from the server's
+     * message list, so an event we do not model cannot desynchronise the panel. A trigger
+     * that arrives while a refresh is already queued is dropped rather than queued, which
+     * keeps a burst of token-level events from turning into a burst of HTTP calls.
+     */
+    private val refreshRequested = kotlinx.coroutines.channels.Channel<Unit>(
+        capacity = kotlinx.coroutines.channels.Channel.CONFLATED,
+    )
 
     /**
      * Connects and opens (or reuses) a session for [directory].
@@ -96,6 +117,7 @@ class OpenCodeSession(
                     ),
                 )
                 openSession(newClient, directory, reuseSessionId)
+                startEvents(newClient)
                 startPolling(newClient)
             } catch (e: OpenCodeException) {
                 _state.value = _state.value.copy(
@@ -112,6 +134,7 @@ class OpenCodeSession(
      */
     fun reportSetupProblem(message: String) {
         pollJob?.cancel()
+        eventJob?.cancel()
         client = null
         _state.value = _state.value.copy(
             connection = OpenCodeConnection.Failed(message),
@@ -127,12 +150,61 @@ class OpenCodeSession(
         val session: SessionInfo = existing ?: client.createSession(
             CreateSessionBody(title = "TITAN: ${directory.substringAfterLast('/')}"),
         )
+        // A new session inherits the server's own working directory, so bind it explicitly.
+        // Without this the agent edits a different tree from the one the build uses.
+        if (directory.isNotBlank()) {
+            runCatching { client.moveSession(session.id, directory) }
+                .onFailure { e ->
+                    _state.value = _state.value.copy(
+                        notice = "Agent is working in the server's default directory, not " +
+                            "$directory: ${e.message}",
+                    )
+                }
+                .onSuccess { _state.value = _state.value.copy(notice = null) }
+        }
         _state.value = _state.value.copy(
             sessionId = session.id,
             sessionTitle = session.title ?: directory.substringAfterLast('/'),
             lastError = null,
         )
         refresh(client, session.id)
+    }
+
+    /**
+     * Subscribes to the server's event stream and refreshes on any event for this session.
+     *
+     * Polling stays as a slower fallback: the stream can drop on a flaky network or sit
+     * behind a proxy that buffers it, and a silent stall is worse than a slightly late
+     * update. The stream only shortens the delay between a tool call and seeing it.
+     */
+    private fun startEvents(client: OpenCodeClient) {
+        eventJob?.cancel()
+        eventJob = scope.launch {
+            while (isActive) {
+                val sessionId = _state.value.sessionId ?: return@launch
+                try {
+                    client.events { _, data ->
+                        if (data.contains(sessionId)) {
+                            refreshRequested.trySend(Unit)
+                        }
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // A dropped stream is expected; log it and reconnect after a pause.
+                    _state.value = _state.value.copy(
+                        lastError = "Live updates paused: ${e.message}. Retrying.",
+                    )
+                    delay(EVENT_RETRY_MS)
+                }
+            }
+        }
+        scope.launch {
+            for (signal in refreshRequested) {
+                val id = _state.value.sessionId ?: continue
+                runCatching { refresh(client, id) }
+            }
+        }
     }
 
     private fun startPolling(client: OpenCodeClient) {
@@ -146,6 +218,7 @@ class OpenCodeSession(
                             _state.value = _state.value.copy(lastError = e.message)
                         }
                     }
+                // Slower while the event stream is live; it carries the fast path.
                 delay(pollIntervalMs)
             }
         }
@@ -225,6 +298,8 @@ class OpenCodeSession(
     fun disconnect() {
         pollJob?.cancel()
         pollJob = null
+        eventJob?.cancel()
+        eventJob = null
         client = null
         _state.value = OpenCodeState()
     }
@@ -233,5 +308,10 @@ class OpenCodeSession(
 
     private fun fail(message: String) {
         _state.value = _state.value.copy(lastError = message)
+    }
+
+    private companion object {
+        /** How long to wait before reopening a dropped event stream. */
+        const val EVENT_RETRY_MS = 3_000L
     }
 }
