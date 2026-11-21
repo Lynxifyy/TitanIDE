@@ -1,6 +1,7 @@
 package dev.titanide.app.di
 
 import android.content.Context
+import android.util.Log
 import androidx.room.Room
 import dev.titanide.app.BuildConfig
 import dev.titanide.core.ai.AiProvider
@@ -18,6 +19,8 @@ import dev.titanide.core.data.repo.ProjectRepository
 import dev.titanide.core.data.repo.ProjectStorage
 import dev.titanide.core.data.repo.TabRepository
 import dev.titanide.core.data.security.CredentialKey
+import dev.titanide.core.git.auth.GitHubAuthState
+import dev.titanide.core.git.auth.resolveGitHubAuth
 import dev.titanide.core.data.security.SecureCredentialStore
 import dev.titanide.core.data.settings.SettingsRepository
 import dev.titanide.core.data.settings.TitanSettings
@@ -32,6 +35,8 @@ import dev.titanide.core.git.auth.DeviceFlowAuth
 import dev.titanide.core.git.local.GitRepositoryService
 import dev.titanide.core.model.ExecutionTarget
 import dev.titanide.core.opencode.session.OpenCodeSession
+import dev.titanide.core.opencode.setup.DiscoveryOutcome
+import dev.titanide.core.opencode.setup.OpenCodeDiscovery
 import dev.titanide.core.templates.GeneratorRegistry
 import dev.titanide.core.templates.ProjectScaffolder
 import kotlinx.coroutines.CoroutineScope
@@ -39,9 +44,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
+import java.io.IOException
 
 /**
  * Manual dependency container. A DI framework would add little here: the graph is small,
@@ -49,6 +57,14 @@ import kotlinx.coroutines.launch
  * takes its dependencies as constructor parameters.
  */
 class TitanContainer(private val context: Context) {
+
+    private companion object {
+        const val TAG = "TitanContainer"
+        const val NOT_CONFIGURED_MESSAGE =
+            "No OpenCode server configured. TITAN cannot run OpenCode on this device because the " +
+                "released binaries target desktop Linux and Windows, not Android. Run " +
+                "`opencode serve` on a computer or server, then set its URL in Settings."
+    }
 
     val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -83,6 +99,19 @@ class TitanContainer(private val context: Context) {
     val settingsState = MutableStateFlow<TitanSettings?>(null)
 
     private val gitHubToken = MutableStateFlow<String?>(null)
+
+    /** Last login GitHub confirmed, so a restart can show the account before re-verifying. */
+    @Volatile
+    private var cachedGitHubLogin: String? = null
+
+    private val _gitHubAuth = MutableStateFlow<GitHubAuthState>(GitHubAuthState.Initializing)
+
+    /**
+     * Settled GitHub auth state. Screens must observe this rather than reading the raw
+     * token, which is null until the Keystore read completes and would make them
+     * render "signed out" for a frame or two on every cold start.
+     */
+    val gitHubAuth: StateFlow<GitHubAuthState> = _gitHubAuth.asStateFlow()
     private val branchRegistry = HashMap<String, String>()
     private var remoteAgentToken: String? = null
 
@@ -108,6 +137,12 @@ class TitanContainer(private val context: Context) {
             runner = processRunner,
         )
     }
+
+    /**
+     * Real probes against the configured server and the loopback default, so the agent
+     * panel can report a specific setup problem instead of a generic failure.
+     */
+    val openCodeDiscovery: OpenCodeDiscovery by lazy { OpenCodeDiscovery() }
 
     /**
      * The OpenCode agent conversation for the current project. One per app process: the
@@ -147,8 +182,10 @@ class TitanContainer(private val context: Context) {
             }
         }
         appScope.launch {
-            gitHubToken.value = credentials.get(CredentialKey.GITHUB_TOKEN)
+            // Sequential on purpose: EncryptedSharedPreferences is not safe to read from
+            // two coroutines at once, and concurrent reads corrupted state under load.
             remoteAgentToken = credentials.get(CredentialKey.REMOTE_AGENT_TOKEN)
+            restoreGitHubAuth()
             buildHistory.prune(settings.settings.first().build.keepLogsDays)
         }
     }
@@ -182,9 +219,63 @@ class TitanContainer(private val context: Context) {
     }
 
     suspend fun refreshCredentials() {
-        gitHubToken.value = credentials.get(CredentialKey.GITHUB_TOKEN)
+        restoreGitHubAuth()
         remoteAgentToken = credentials.get(CredentialKey.REMOTE_AGENT_TOKEN)
         refreshAiProvider()
+    }
+
+    /**
+     * Loads the saved token at startup. This deliberately does NOT call GitHub: a network
+     * round trip here would leave a coroutine running for the whole process lifetime and
+     * make startup depend on connectivity. A token found on disk is reported as
+     * [GitHubAuthState.SignedIn] optimistically and verified on first real use, where a
+     * rejection is visible to the caller anyway.
+     */
+    private suspend fun restoreGitHubAuth() {
+        val saved = runCatching { credentials.get(CredentialKey.GITHUB_TOKEN) }
+            .onFailure { Log.w(TAG, "Could not read the saved GitHub token", it) }
+            .getOrNull()
+        gitHubToken.value = saved
+        _gitHubAuth.value = if (saved.isNullOrBlank()) {
+            GitHubAuthState.SignedOut
+        } else {
+            GitHubAuthState.SignedIn(login = cachedGitHubLogin.orEmpty(), avatarUrl = null)
+        }
+    }
+
+    private suspend fun verifyGitHubToken(token: String): GitHubAuthState =
+        resolveGitHubAuth(
+            result = gitHubApi.currentUser(),
+            isUnauthorized = ::isUnauthorized,
+            isOffline = { it is IOException },
+            onTokenRejected = {
+                // The token is stale. Drop it so the user is not left half-signed-in.
+                runCatching { credentials.remove(CredentialKey.GITHUB_TOKEN) }
+                gitHubToken.value = null
+                cachedGitHubLogin = null
+            },
+        ).also { state ->
+            if (state is GitHubAuthState.SignedIn && state.login.isNotEmpty()) {
+                cachedGitHubLogin = state.login
+            }
+        }
+
+    private fun isUnauthorized(e: Throwable): Boolean =
+        e.message?.contains("401") == true || e.message?.contains("rejected the token") == true
+
+    /** Marks the session as expired after a 401 from any GitHub call. */
+    fun markGitHubExpired() {
+        _gitHubAuth.value = GitHubAuthState.Expired
+    }
+
+    fun beginGitHubSignIn(userCode: String, verificationUri: String, expiresAt: Long) {
+        _gitHubAuth.value = GitHubAuthState.SigningIn(userCode, verificationUri, expiresAt)
+    }
+
+    fun cancelGitHubSignIn() {
+        if (_gitHubAuth.value is GitHubAuthState.SigningIn) {
+            _gitHubAuth.value = GitHubAuthState.SignedOut
+        }
     }
 
     /**
@@ -192,28 +283,62 @@ class TitanContainer(private val context: Context) {
      * directory falls back to the project name so a first run has a sensible default
      * instead of an empty string the server would reject.
      */
-    fun connectAgent(project: dev.titanide.core.model.Project?) {
+    fun connectAgent(project: dev.titanide.core.model.Project?, explicit: Boolean = false) {
         val openCode = settingsState.value?.openCode ?: return
-        if (openCode.serverUrl.isBlank()) return
         val directory = openCode.remoteProjectDir.ifBlank {
             project?.rootPath?.substringAfterLast('/') ?: project?.name.orEmpty()
         }
+        val configured = openCode.serverUrl.trim()
+        // Loading a project must not touch the network: probing loopback on every open made
+        // startup depend on connectivity and left work running for the whole process. A
+        // configured URL is trusted and connected to directly; loopback discovery only runs
+        // when the user asks for it.
+        if (configured.isEmpty() && !explicit) {
+            openCodeSession.reportSetupProblem(NOT_CONFIGURED_MESSAGE)
+            return
+        }
         appScope.launch {
             val token = credentials.get(CredentialKey.OPENCODE_TOKEN)
-            openCodeSession.connect(
-                url = openCode.serverUrl,
-                token = token,
-                directory = directory,
-            )
+            if (!explicit && configured.isNotEmpty()) {
+                openCodeSession.connect(url = configured, token = token, directory = directory)
+                return@launch
+            }
+            when (val outcome = openCodeDiscovery.discover(configured, token)) {
+                is DiscoveryOutcome.Ready -> openCodeSession.connect(
+                    url = outcome.url,
+                    token = token,
+                    directory = directory,
+                )
+                is DiscoveryOutcome.NoModels -> openCodeSession.reportSetupProblem(
+                    "Found an OpenCode server at ${outcome.url}, but it has no model configured. " +
+                        "Run `opencode auth login` on that machine, then reconnect.",
+                )
+                is DiscoveryOutcome.Unhealthy -> openCodeSession.reportSetupProblem(
+                    "An OpenCode server answered at ${outcome.url} but is not healthy: ${outcome.reason}",
+                )
+                DiscoveryOutcome.NotFound -> openCodeSession.reportSetupProblem(NOT_CONFIGURED_MESSAGE)
+            }
         }
     }
 
-    fun isGitHubSignedIn(): Boolean = !gitHubToken.value.isNullOrBlank()
+    /**
+     * True only when the token has finished loading AND is usable. Callers that need to
+     * distinguish "still loading" from "signed out" must read [gitHubAuth].
+     */
+    fun isGitHubSignedIn(): Boolean = _gitHubAuth.value.hasUsableToken
 
     fun githubTokenOrNull(): String? = gitHubToken.value
 
-    fun setGitHubToken(token: String?) {
+    /** Stores a freshly issued token and resolves the signed-in account. */
+    suspend fun setGitHubToken(token: String?) {
         gitHubToken.value = token
+        if (token.isNullOrBlank()) {
+            credentials.remove(CredentialKey.GITHUB_TOKEN)
+            _gitHubAuth.value = GitHubAuthState.SignedOut
+            return
+        }
+        credentials.put(CredentialKey.GITHUB_TOKEN, token)
+        _gitHubAuth.value = verifyGitHubToken(token)
     }
 
     fun registerBranch(projectId: String, branch: String) {

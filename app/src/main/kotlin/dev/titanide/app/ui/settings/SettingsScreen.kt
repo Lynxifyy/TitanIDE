@@ -153,17 +153,26 @@ fun SettingsScreen() {
                         }
                         !state.gitHubSignedIn -> {
                             Spacer(Modifier.height(10.dp))
+                            // Sign-in cannot start without the build's OAuth client id, so the
+                            // button is disabled rather than allowed to fail on tap.
                             Button(
                                 onClick = viewModel::startGitHubSignIn,
+                                enabled = state.gitHubOAuthAvailable,
                                 shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = TitanColors.Primary),
                             ) { Text("Sign in with GitHub") }
                             Spacer(Modifier.height(4.dp))
                             Text(
-                                "Requires a GitHub OAuth client id at build time. Without one, use the Git " +
-                                    "screen to push with a personal access token.",
+                                if (state.gitHubOAuthAvailable) {
+                                    "Sign in opens github.com/login/device with a one-time code."
+                                } else {
+                                    "This build was compiled without a GitHub OAuth client id, so " +
+                                        "one-tap sign-in is unavailable. Everything else works: add a " +
+                                        "personal access token on the Git screen to clone, push and open " +
+                                        "pull requests."
+                                },
                                 style = MaterialTheme.typography.labelSmall,
-                                color = TitanColors.TextMuted,
+                                color = if (state.gitHubOAuthAvailable) TitanColors.TextMuted else TitanColors.Warning,
                             )
                         }
                         else -> {

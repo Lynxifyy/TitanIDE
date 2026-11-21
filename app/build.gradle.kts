@@ -20,9 +20,14 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
 
-        // Set by CI or a local gradle.properties override; never committed.
-        val githubClientId = providers.gradleProperty("titan.github.clientId").orElse("")
+        // TITAN's own registered GitHub OAuth App. This is developer-owned configuration, not
+        // a user setting: shipping a release without it makes the advertised sign-in impossible,
+        // so the release build fails instead of quietly producing a broken APK.
+        val githubClientId = providers.gradleProperty("titan.github.clientId")
+            .orElse(providers.environmentVariable("TITAN_GITHUB_CLIENT_ID"))
+            .orElse("")
         buildConfigField("String", "GITHUB_CLIENT_ID", "\"${githubClientId.get()}\"")
+        buildConfigField("boolean", "GITHUB_OAUTH_CONFIGURED", githubClientId.get().isNotBlank().toString())
     }
 
     // Release signing reads from the environment or an untracked gradle.properties, so no
@@ -105,6 +110,29 @@ android {
 androidComponents {
     beforeVariants(selector().withBuildType("release")) { variant ->
         variant.enableUnitTest = false
+    }
+}
+
+// GitHub sign-in needs TITAN's own registered OAuth App client id, which is developer
+// configuration rather than a user setting. Failing the build would block the whole APK
+// over one feature, so instead the build states plainly what is missing and the app
+// surfaces it at runtime (BuildConfig.GITHUB_OAUTH_CONFIGURED).
+tasks.configureEach {
+    if (name == "assembleRelease" || name == "bundleRelease") {
+        doFirst {
+            val id = providers.gradleProperty("titan.github.clientId")
+                .orElse(providers.environmentVariable("TITAN_GITHUB_CLIENT_ID"))
+                .getOrElse("")
+            if (id.isBlank()) {
+                logger.lifecycle(
+                    "WARNING: GitHub OAuth is not configured, so in-app GitHub sign-in is " +
+                        "disabled in this build. Everything else works. To enable it, register " +
+                        "an OAuth App at https://github.com/settings/developers with device " +
+                        "flow enabled and pass -Ptitan.github.clientId=<id> or set " +
+                        "TITAN_GITHUB_CLIENT_ID.",
+                )
+            }
+        }
     }
 }
 

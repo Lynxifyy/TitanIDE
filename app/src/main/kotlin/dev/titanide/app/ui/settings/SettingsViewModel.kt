@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.titanide.app.di.TitanContainer
 import dev.titanide.core.data.security.CredentialKey
+import dev.titanide.core.git.auth.GitHubAuthState
 import dev.titanide.core.data.settings.TitanSettings
 import dev.titanide.core.model.ToolchainInfo
 import dev.titanide.core.git.auth.DeviceFlowAuth
@@ -27,6 +28,8 @@ data class SettingsUiState(
     val probing: Boolean = false,
     val gitHubLogin: String? = null,
     val gitHubSignedIn: Boolean = false,
+    /** False when this APK was built without TITAN's OAuth client id. */
+    val gitHubOAuthAvailable: Boolean = false,
     val deviceFlow: DeviceFlowUi? = null,
     val aiKeyStored: Boolean = false,
     val remoteTokenStored: Boolean = false,
@@ -53,6 +56,10 @@ class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
                 )
             }
         }
+        // Whether sign-in is even possible is fixed at build time, so read it once.
+        _state.value = _state.value.copy(
+            gitHubOAuthAvailable = container.deviceFlow.isConfigured(),
+        )
         viewModelScope.launch {
             refreshGitHubIdentity()
             _state.value = _state.value.copy(storageUsed = container.storageUsedBytes())
@@ -120,12 +127,19 @@ class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
                                 return@launch
                             }
                             container.setGitHubToken(outcome.token)
+                            // Report the state GitHub actually resolved, not an assumption.
+                            val resolved = container.gitHubAuth.value
                             _state.value = _state.value.copy(
                                 deviceFlow = null,
-                                gitHubSignedIn = true,
-                                message = "Signed in to GitHub",
+                                gitHubSignedIn = resolved.isSignedIn,
+                                gitHubLogin = (resolved as? GitHubAuthState.SignedIn)?.login,
+                                message = when {
+                                    resolved.isSignedIn -> "Signed in to GitHub"
+                                    resolved is GitHubAuthState.Expired -> "GitHub rejected the new token"
+                                    resolved is GitHubAuthState.Error -> "Signed in, but GitHub was unreachable"
+                                    else -> "Signed in"
+                                },
                             )
-                            refreshGitHubIdentity()
                             return@launch
                         }
                         is DeviceFlowAuth.PollOutcome.Pending -> Unit
@@ -167,7 +181,11 @@ class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
         viewModelScope.launch {
             container.credentials.remove(CredentialKey.GITHUB_TOKEN)
             container.setGitHubToken(null)
-            _state.value = _state.value.copy(gitHubSignedIn = false, gitHubLogin = null, message = "Signed out of GitHub")
+            _state.value = _state.value.copy(
+                gitHubSignedIn = false,
+                gitHubLogin = null,
+                message = "Signed out of GitHub",
+            )
         }
     }
 

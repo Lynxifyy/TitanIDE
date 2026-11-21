@@ -106,6 +106,20 @@ class OpenCodeSession(
         }
     }
 
+    /**
+     * Records a setup problem the user must fix on the server machine, without pretending
+     * a connection exists. Discovery calls this when no usable server is found.
+     */
+    fun reportSetupProblem(message: String) {
+        pollJob?.cancel()
+        client = null
+        _state.value = _state.value.copy(
+            connection = OpenCodeConnection.Failed(message),
+            running = false,
+            lastError = message,
+        )
+    }
+
     private suspend fun openSession(client: OpenCodeClient, directory: String, reuseSessionId: String?) {
         val existing = reuseSessionId?.let { id ->
             runCatching { client.getSession(id) }.getOrNull()

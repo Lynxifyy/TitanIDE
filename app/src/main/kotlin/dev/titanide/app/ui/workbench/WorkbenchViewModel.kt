@@ -532,7 +532,8 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
     fun answerPermission(requestId: String, decision: PermissionDecision) =
         container.openCodeSession.answerPermission(requestId, decision)
 
-    fun reconnectAgent() = container.connectAgent(_project.value)
+    /** User-initiated retry, so it is allowed to probe for a server. */
+    fun reconnectAgent() = container.connectAgent(_project.value, explicit = true)
 
     override fun onCleared() {
         container.openCodeSession.disconnect()
