@@ -161,4 +161,38 @@ class WorkbenchAutoSaveTest {
             viewModel.buffers.value[path]!!.content,
         )
     }
+
+    /**
+     * A save that finishes after the user kept typing must not mark the buffer clean. The write
+     * completes with whatever text it was given, but the buffer may have moved on, and calling
+     * setDirty(false) on the newer content tells the user their newer text is on disk when it is
+     * not. The next auto-save then skips it because the buffer is no longer dirty, and closing
+     * the tab discards the work.
+     */
+    @Test
+    fun `a save that finishes late does not mark newer text as saved`() = runBlocking {
+        val path = "src/Late.kt"
+        // Auto-save would eventually save the newer text too and hide the defect.
+        container.settings.updateEditor { it.copy(autoSave = false) }
+        val viewModel = openedWorkbench(path, "val a = 1\n")
+
+        viewModel.edit(path, "val a = 2\n")
+        // Start the write, then type again while it is in flight.
+        viewModel.save(path)
+        viewModel.edit(path, "val a = 3\n")
+
+        val deadline = System.currentTimeMillis() + 20_000
+        while (viewModel.buffers.value.getValue(path).dirty && System.currentTimeMillis() < deadline) {
+            Thread.sleep(25)
+        }
+        assertEquals(
+            "the buffer still holds text that never reached disk, so it must stay dirty",
+            "val a = 3\n",
+            viewModel.buffers.value.getValue(path).content,
+        )
+        assertTrue(
+            "newer text must not be reported as saved",
+            viewModel.buffers.value.getValue(path).dirty,
+        )
+    }
 }

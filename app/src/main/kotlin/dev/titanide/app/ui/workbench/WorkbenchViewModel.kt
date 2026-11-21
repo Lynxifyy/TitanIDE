@@ -396,11 +396,19 @@ class WorkbenchViewModel(
         val project = _project.value ?: return
         val buffer = _buffers.value[path] ?: return
         if (!buffer.dirty) return
+        val written = buffer.content
         viewModelScope.launch {
-            when (val result = container.fileTreeRepository.write(project, path, buffer.content)) {
+            when (val result = container.fileTreeRepository.write(project, path, written)) {
                 is SafeFileSystem.Result.Ok -> {
-                    _buffers.value = _buffers.value + (path to buffer.copy(savedContent = buffer.content))
-                    _state.value = _state.value.setDirty(path, false)
+                    // Only the text that was written counts as saved. If the user typed while
+                    // the write was in flight the buffer has moved on, and marking it clean
+                    // would skip the next auto-save and lose that text when the tab closes.
+                    _buffers.update { buffers ->
+                        val latest = buffers[path] ?: return@update buffers
+                        buffers + (path to latest.copy(savedContent = written))
+                    }
+                    val stillSaved = _buffers.value[path]?.content == written
+                    _state.value = _state.value.setDirty(path, !stillSaved)
                     if (!silent) _message.value = "Saved ${path.substringAfterLast('/')}"
                 }
 
