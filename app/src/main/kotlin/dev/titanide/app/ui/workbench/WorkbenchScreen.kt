@@ -82,6 +82,9 @@ fun WorkbenchScreen(
     val diagnostics by viewModel.diagnostics.collectAsStateWithLifecycle()
     val expanded by viewModel.expanded.collectAsStateWithLifecycle()
     val searchHits by viewModel.searchHits.collectAsStateWithLifecycle()
+    val symbolResults by viewModel.symbolResults.collectAsStateWithLifecycle()
+    val references by viewModel.references.collectAsStateWithLifecycle()
+    val referenceTarget by viewModel.referenceTarget.collectAsStateWithLifecycle()
     val find by viewModel.find.collectAsStateWithLifecycle()
     val appearance by viewModel.appearance.collectAsStateWithLifecycle()
     val revealToken by viewModel.revealRequests.collectAsStateWithLifecycle()
@@ -155,6 +158,11 @@ fun WorkbenchScreen(
                         onOpenHit = { hit -> viewModel.openFileAtLine(hit.path, hit.line) },
                         onOpenFindInFile = { replace -> viewModel.openFind(replace) },
                         onSearch = viewModel::search,
+                        symbols = symbolResults,
+                        onSearchSymbols = viewModel::searchSymbols,
+                        onOpenSymbol = { declaration ->
+                            viewModel.openFileAtLine(declaration.symbol.filePath, declaration.line + 1)
+                        },
                         onNewFile = { prompt = NamePrompt.NewFile },
                         onNewFolder = { prompt = NamePrompt.NewFolder },
                         onRefresh = viewModel::refreshFiles,
@@ -206,6 +214,14 @@ fun WorkbenchScreen(
                                 onIndent = viewModel::indent,
                                 onUndo = viewModel::undo,
                                 onRedo = viewModel::redo,
+                                onGoToDefinition = viewModel::goToDefinition,
+                                onFindReferences = viewModel::findReferences,
+                                referenceTarget = referenceTarget,
+                                references = references,
+                                onOpenReference = { reference ->
+                                    viewModel.openFileAtLine(reference.filePath, reference.line + 1)
+                                },
+                                onCloseReferences = viewModel::closeReferences,
                                 modifier = Modifier.weight(1f).fillMaxHeight(),
                                 showGutter = active || state.groups.size == 1,
                                 find = find,
@@ -316,6 +332,11 @@ fun WorkbenchScreen(
                     onOpenHit = { hit -> viewModel.openFileAtLine(hit.path, hit.line) },
                     onOpenFindInFile = { replace -> viewModel.openFind(replace) },
                     onSearch = viewModel::search,
+                    symbols = symbolResults,
+                    onSearchSymbols = viewModel::searchSymbols,
+                    onOpenSymbol = { declaration ->
+                        viewModel.openFileAtLine(declaration.symbol.filePath, declaration.line + 1)
+                    },
                     onNewFile = { prompt = NamePrompt.NewFile },
                     onNewFolder = { prompt = NamePrompt.NewFolder },
                     onRefresh = viewModel::refreshFiles,
@@ -477,6 +498,9 @@ private fun SidebarHost(
     onOpenHit: (SearchHit) -> Unit,
     onOpenFindInFile: (Boolean) -> Unit,
     onSearch: (String) -> Unit,
+    symbols: List<dev.titanide.core.editor.SymbolDeclaration>,
+    onSearchSymbols: (String) -> Unit,
+    onOpenSymbol: (dev.titanide.core.editor.SymbolDeclaration) -> Unit,
     onNewFile: () -> Unit,
     onNewFolder: () -> Unit,
     onRefresh: () -> Unit,
@@ -554,6 +578,9 @@ private fun SidebarHost(
                 hits = searchHits,
                 onOpenHit = onOpenHit,
                 onOpenFindInFile = onOpenFindInFile,
+                symbols = symbols,
+                onSearchSymbols = onSearchSymbols,
+                onOpenSymbol = onOpenSymbol,
             )
 
             Activity.SOURCE_CONTROL -> SourceControlSidebar(

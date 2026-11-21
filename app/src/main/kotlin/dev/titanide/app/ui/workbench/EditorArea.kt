@@ -73,6 +73,9 @@ import dev.titanide.core.model.Severity
 import dev.titanide.core.workbench.EditorGroup
 import dev.titanide.core.workbench.EditorTab
 import dev.titanide.core.workbench.breadcrumbFor
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyColumn
+import dev.titanide.core.editor.SymbolReference
 
 /**
  * The editor area: tab strip, breadcrumb, gutter and the code surface.
@@ -96,6 +99,12 @@ fun EditorArea(
     onIndent: (Boolean) -> Unit,
     onUndo: () -> Unit = {},
     onRedo: () -> Unit = {},
+    onGoToDefinition: () -> Unit = {},
+    onFindReferences: () -> Unit = {},
+    referenceTarget: String? = null,
+    references: List<SymbolReference> = emptyList(),
+    onOpenReference: (SymbolReference) -> Unit = {},
+    onCloseReferences: () -> Unit = {},
     modifier: Modifier = Modifier,
     showGutter: Boolean = true,
     find: FindState = FindState(),
@@ -129,6 +138,8 @@ fun EditorArea(
                 onRedo = onRedo,
                 onToggleComment = onToggleComment,
                 onFormat = onFormat,
+                onGoToDefinition = onGoToDefinition,
+                onFindReferences = onFindReferences,
                 modifier = Modifier.weight(1f),
                 showGutter = showGutter && appearance.showLineNumbers,
                 activeMatch = find.current,
@@ -147,6 +158,14 @@ fun EditorArea(
                     onClose = onCloseFind,
                 )
             }
+            if (referenceTarget != null) {
+                ReferencesPanel(
+                    name = referenceTarget,
+                    references = references,
+                    onOpen = onOpenReference,
+                    onClose = onCloseReferences,
+                )
+            }
             EditorStatusStrip(
                 buffer = buffer,
                 diagnostics = diagnostics,
@@ -157,6 +176,8 @@ fun EditorArea(
                 onUndo = onUndo,
                 onRedo = onRedo,
                 onFind = { onFindQueryChange(find.query) },
+                onGoToDefinition = onGoToDefinition,
+                onFindReferences = onFindReferences,
             )
         } else {
             NoFileOpen()
@@ -272,6 +293,12 @@ private fun CodeSurface(
     onRedo: () -> Unit,
     onToggleComment: () -> Unit,
     onFormat: () -> Unit,
+    onGoToDefinition: () -> Unit = {},
+    onFindReferences: () -> Unit = {},
+    referenceTarget: String? = null,
+    references: List<SymbolReference> = emptyList(),
+    onOpenReference: (SymbolReference) -> Unit = {},
+    onCloseReferences: () -> Unit = {},
     modifier: Modifier = Modifier,
     showGutter: Boolean = true,
     activeMatch: IntRange? = null,
@@ -307,6 +334,7 @@ private fun CodeSurface(
             Key.S -> KeyName.S
             Key.Slash -> KeyName.SLASH
             Key.F -> KeyName.F
+            Key.F12 -> KeyName.F12
             else -> KeyName.UNKNOWN
         }
         val chord = KeyChord(name, ctrl = event.isCtrlPressed, shift = event.isShiftPressed)
@@ -316,6 +344,8 @@ private fun CodeSurface(
             EditorCommand.SAVE -> { onSave(); true }
             EditorCommand.TOGGLE_COMMENT -> { onToggleComment(); true }
             EditorCommand.FORMAT -> { onFormat(); true }
+            EditorCommand.GO_TO_DEFINITION -> { onGoToDefinition(); true }
+            EditorCommand.FIND_REFERENCES -> { onFindReferences(); true }
             null -> false
         }
     }
@@ -447,6 +477,8 @@ private fun EditorStatusStrip(
     onUndo: () -> Unit,
     onRedo: () -> Unit,
     onFind: () -> Unit,
+    onGoToDefinition: () -> Unit,
+    onFindReferences: () -> Unit,
 ) {
     val errors = diagnostics.count { it.severity == Severity.ERROR }
     val warnings = diagnostics.count { it.severity == Severity.WARNING }
@@ -469,6 +501,9 @@ private fun EditorStatusStrip(
         // taken back is not usable.
         ActionChip("Undo", onUndo)
         ActionChip("Redo", onRedo)
+        // Navigation has to be tappable for the same reason: there is no F12 on a phone.
+        ActionChip("Definition", onGoToDefinition)
+        ActionChip("References", onFindReferences)
         ActionChip("Find", onFind)
         ActionChip("Comment", onToggleComment)
         ActionChip("Format", onFormat)
@@ -614,6 +649,87 @@ private fun NoFileOpen() {
                 color = TitanColors.TextMuted.copy(alpha = 0.5f),
                 fontSize = 10.sp,
             )
+        }
+    }
+}
+
+/**
+ * The find-references result list.
+ *
+ * It sits above the status strip rather than in a sheet so the code stays visible while the
+ * list is read: deciding which use matters needs both on screen.
+ */
+@Composable
+private fun ReferencesPanel(
+    name: String,
+    references: List<SymbolReference>,
+    onOpen: (SymbolReference) -> Unit,
+    onClose: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 180.dp)
+            .background(TitanColors.CanvasElevated),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(24.dp)
+                .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "$name \u00b7 ${references.size} reference${if (references.size == 1) "" else "s"}",
+                color = TitanColors.TextPrimary,
+                fontSize = 10.5.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = "Close",
+                color = TitanColors.Secondary,
+                fontSize = 10.5.sp,
+                modifier = Modifier.clickable(onClick = onClose).padding(4.dp),
+            )
+        }
+        if (references.isEmpty()) {
+            Text(
+                text = "Nothing in the project uses this symbol.",
+                color = TitanColors.TextMuted,
+                fontSize = 10.5.sp,
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            )
+        }
+        LazyColumn(modifier = Modifier.fillMaxWidth()) {
+            items(references, key = { "${it.filePath}:${it.line}:${it.column}" }) { reference ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(WorkbenchMetrics.RowHeight)
+                        .clickable { onOpen(reference) }
+                        .padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "${reference.filePath.substringAfterLast('/')}:${reference.line + 1}",
+                        color = TitanColors.Secondary,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        modifier = Modifier.width(120.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = reference.lineText,
+                        color = if (reference.isDeclaration) TitanColors.TextPrimary else TitanColors.TextMuted,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
         }
     }
 }

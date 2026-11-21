@@ -57,4 +57,22 @@ class KeyBindingsTest {
     fun `an unbound key does nothing`() {
         assertNull(KeyBindings.commandFor(KeyChord(KeyName.UNKNOWN, ctrl = true)))
     }
+
+    @Test
+    fun `f12 navigates to the definition`() {
+        assertEquals(EditorCommand.GO_TO_DEFINITION, KeyBindings.commandFor(KeyChord(KeyName.F12)))
+    }
+
+    @Test
+    fun `shift f12 finds references`() {
+        assertEquals(
+            EditorCommand.FIND_REFERENCES,
+            KeyBindings.commandFor(KeyChord(KeyName.F12, shift = true)),
+        )
+    }
+
+    @Test
+    fun `a bare unknown key is not a shortcut`() {
+        assertNull(KeyBindings.commandFor(KeyChord(KeyName.UNKNOWN)))
+    }
 }

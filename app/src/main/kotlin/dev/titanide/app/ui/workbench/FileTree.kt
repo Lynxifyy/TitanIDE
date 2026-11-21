@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -43,6 +44,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.titanide.core.designsystem.TitanColors
+import dev.titanide.core.editor.SymbolDeclaration
 import dev.titanide.core.workbench.AndroidGroup
 import dev.titanide.core.workbench.ProjectNode
 
@@ -260,7 +262,11 @@ fun SearchView(
     onOpenHit: (SearchHit) -> Unit,
     modifier: Modifier = Modifier,
     onOpenFindInFile: (replace: Boolean) -> Unit = {},
+    symbols: List<SymbolDeclaration> = emptyList(),
+    onSearchSymbols: (String) -> Unit = {},
+    onOpenSymbol: (SymbolDeclaration) -> Unit = {},
 ) {
+    var symbolQuery by remember { mutableStateOf("") }
     androidx.compose.foundation.layout.Column(modifier = modifier.fillMaxWidth()) {
         PanelHeader(title = "Search")
         SearchField(
@@ -330,6 +336,80 @@ fun SearchView(
                         modifier = Modifier.weight(1f),
                     )
                 }
+            }
+        }
+        SymbolSearch(
+            query = symbolQuery,
+            onQueryChange = {
+                symbolQuery = it
+                onSearchSymbols(it)
+            },
+            symbols = symbols,
+            onOpenSymbol = onOpenSymbol,
+        )
+    }
+}
+
+/**
+ * Go to symbol: searches declarations across the project rather than text.
+ *
+ * The project search above finds every occurrence of a string; this finds where something is
+ * declared, which is what "jump to the class" needs.
+ */
+@Composable
+private fun SymbolSearch(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    symbols: List<SymbolDeclaration>,
+    onOpenSymbol: (SymbolDeclaration) -> Unit,
+) {
+    PanelHeader(title = "Symbols")
+    SearchField(
+        value = query,
+        onValueChange = onQueryChange,
+        placeholder = "Go to symbol",
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+    )
+    if (query.isNotBlank() && symbols.isEmpty()) {
+        Text(
+            text = "No matching declaration",
+            color = TitanColors.TextMuted,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+        )
+    }
+    LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp)) {
+        items(symbols, key = { "${it.symbol.filePath}:${it.line}:${it.column}:${it.symbol.name}" }) { declaration ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(WorkbenchMetrics.RowHeight)
+                    .clickable { onOpenSymbol(declaration) }
+                    .padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = declaration.symbol.name,
+                    color = TitanColors.TextPrimary,
+                    fontSize = 10.5.sp,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = declaration.symbol.kind.name.lowercase(),
+                    color = TitanColors.Secondary,
+                    fontSize = 9.5.sp,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = "${declaration.symbol.filePath.substringAfterLast('/')}:${declaration.line + 1}",
+                    color = TitanColors.TextMuted,
+                    fontSize = 9.5.sp,
+                    maxLines = 1,
+                )
             }
         }
     }

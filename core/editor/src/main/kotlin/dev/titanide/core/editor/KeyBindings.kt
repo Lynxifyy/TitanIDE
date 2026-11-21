@@ -7,10 +7,10 @@ data class KeyChord(
     val shift: Boolean = false,
 )
 
-enum class KeyName { Z, Y, S, SLASH, F, UNKNOWN }
+enum class KeyName { Z, Y, S, SLASH, F, F12, UNKNOWN }
 
 /** An editor command a key chord can trigger. */
-enum class EditorCommand { UNDO, REDO, SAVE, TOGGLE_COMMENT, FORMAT }
+enum class EditorCommand { UNDO, REDO, SAVE, TOGGLE_COMMENT, FORMAT, GO_TO_DEFINITION, FIND_REFERENCES }
 
 /**
  * Maps key chords to editor commands.
@@ -22,13 +22,19 @@ enum class EditorCommand { UNDO, REDO, SAVE, TOGGLE_COMMENT, FORMAT }
 object KeyBindings {
 
     fun commandFor(chord: KeyChord): EditorCommand? {
-        if (!chord.ctrl) return null
+        if (!chord.ctrl) {
+            return when (chord.key) {
+                KeyName.F12 -> if (chord.shift) EditorCommand.FIND_REFERENCES else EditorCommand.GO_TO_DEFINITION
+                else -> null
+            }
+        }
         return when (chord.key) {
             KeyName.Z -> if (chord.shift) EditorCommand.REDO else EditorCommand.UNDO
             KeyName.Y -> EditorCommand.REDO
             KeyName.S -> EditorCommand.SAVE
             KeyName.SLASH -> EditorCommand.TOGGLE_COMMENT
             KeyName.F -> EditorCommand.FORMAT
+            KeyName.F12 -> if (chord.shift) EditorCommand.FIND_REFERENCES else EditorCommand.GO_TO_DEFINITION
             KeyName.UNKNOWN -> null
         }
     }

@@ -17,7 +17,7 @@ disabled placeholder.
 | Area | Status | Evidence |
 | --- | --- | --- |
 | Project scaffolding | 4 categories, 20+ languages, game mod catalog | `core/templates`, `ProjectScaffolder` tests |
-| Code editor | Tokenizer, undo stack, incremental diff, search, CodeGuard analysis | `core/editor` tests |
+| Code editor | Tokenizer, undo stack, incremental diff, search, CodeGuard analysis, project-wide symbol index for go-to-definition / find-references / go-to-symbol | `core/editor` tests |
 | Project file system | Sandboxed read/write/move/copy, zip-slip hardened extraction | `core/data` `SafeFileSystem` tests |
 | Git | Clone, commit, branch, checkout, merge, push, pull, diff, log via JGit | `core/git` tests |
 | GitHub | Device-flow OAuth, repo browse, clone-to-project, remote test | `core/git` + app UI |
@@ -44,6 +44,12 @@ TITAN does not pretend. These are platform limits, not unfinished work:
   project declares instead.
 - **Other apps' databases.** Scoped storage blocks it. The Database Viewer reads TITAN's
   own Room tables.
+- **A language server.** No LSP server ships with, or can be spawned by, an Android app,
+  and bundling a JVM language server would mean shipping a JDK. Navigation is therefore
+  answered by TITAN's own symbol index: declarations come from the per-language extractor
+  in `core/editor`, and references are matched on real lexer tokens, so identifiers inside
+  comments and strings are not reported. This resolves names, not types — it will not tell
+  you which overload a call binds to.
 
 ## Architecture
 

@@ -10,6 +10,9 @@ import dev.titanide.core.engine.InstallOutcome
 import dev.titanide.core.editor.EditorEngine
 import dev.titanide.core.editor.SearchEngine
 import dev.titanide.core.editor.SearchOptions
+import dev.titanide.core.editor.SymbolDeclaration
+import dev.titanide.core.editor.SymbolIndex
+import dev.titanide.core.editor.SymbolReference
 import dev.titanide.core.editor.TextDiff
 import dev.titanide.core.editor.TextDocument
 import dev.titanide.core.editor.UndoStack
@@ -90,6 +93,9 @@ data class FindState(
     val count: Int get() = matches.size
 }
 
+/** How many on-disk files the symbol index will read. Keeps a huge repo from stalling. */
+private const val MAX_INDEXED_FILES = 400
+
 /**
  * Drives the workbench: real project files through [SafeFileSystem], real diagnostics
  * through CodeGuard, real builds through the shared BuildEngine, and the real OpenCode
@@ -148,6 +154,16 @@ class WorkbenchViewModel(
     private val _revealRequests = MutableStateFlow(0L)
     val revealRequests: StateFlow<Long> = _revealRequests.asStateFlow()
 
+    private val _symbolResults = MutableStateFlow<List<SymbolDeclaration>>(emptyList())
+    val symbolResults: StateFlow<List<SymbolDeclaration>> = _symbolResults.asStateFlow()
+
+    private val _references = MutableStateFlow<List<SymbolReference>>(emptyList())
+    val references: StateFlow<List<SymbolReference>> = _references.asStateFlow()
+
+    /** The name the references panel is currently showing, or null when it is closed. */
+    private val _referenceTarget = MutableStateFlow<String?>(null)
+    val referenceTarget: StateFlow<String?> = _referenceTarget.asStateFlow()
+
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
@@ -171,6 +187,7 @@ class WorkbenchViewModel(
     private fun undoStackFor(path: String): UndoStack =
         undoStacks.computeIfAbsent(path) { UndoStack() }
     private val searchEngine = SearchEngine()
+    private val symbolIndex = SymbolIndex()
     /** Debounce handles are per file, so work queued for one file is never cancelled by another. */
     private val debounceJobs = java.util.concurrent.ConcurrentHashMap<String, Job>()
     private var searchJob: Job? = null
@@ -728,6 +745,126 @@ class WorkbenchViewModel(
             }
             _searchHits.value = hits
         }
+    }
+
+    // ------------------------------------------------------------ navigation
+
+    private var indexJob: Job? = null
+    private var symbolJob: Job? = null
+
+    /**
+     * Rebuilds the project symbol index from the open buffers and the files on disk.
+     *
+     * There is no language server, so go-to-definition and find-references are answered from
+     * this index. It is rebuilt on demand rather than on every keystroke because a project-wide
+     * re-tokenise is far more work than a single-file analysis.
+     */
+    fun buildSymbolIndex() {
+        indexJob?.cancel()
+        indexJob = viewModelScope.launch { buildSymbolIndexNow() }
+    }
+
+    private suspend fun buildSymbolIndexNow() {
+        val project = _project.value ?: return
+            val open = _buffers.value
+            val sources = LinkedHashMap<String, String>()
+            open.forEach { (path, buffer) -> sources[path] = buffer.content }
+            withContext(Dispatchers.Default) {
+                val onDisk = container.fileTreeRepository.list(project)
+                    .filter { it.kind == FileKind.FILE && it.path !in open }
+                    .map { it.path }
+                    .take(MAX_INDEXED_FILES)
+                for (path in onDisk) {
+                    val read = container.fileTreeRepository.read(project, path)
+                    if (read is SafeFileSystem.Result.Ok) sources[path] = read.value
+                }
+            }
+        withContext(Dispatchers.Default) {
+            symbolIndex.clear()
+            sources.forEach { (path, text) ->
+                symbolIndex.put(path, text, Language.fromFileName(path))
+            }
+        }
+    }
+
+    /**
+     * Builds the index if it is empty and waits for it.
+     *
+     * Navigation used to kick off a rebuild and then read the index immediately, so the first
+     * go-to-definition in a session found nothing. Awaiting the build is what makes the first
+     * use work.
+     */
+    private suspend fun ensureIndex() {
+        if (symbolIndex.size > 0) return
+        indexJob?.join()
+        if (symbolIndex.size > 0) return
+        buildSymbolIndexNow()
+    }
+
+    /** Symbols whose name contains [query], for the go-to-symbol list. */
+    fun searchSymbols(query: String) {
+        if (query.isBlank()) {
+            _symbolResults.value = emptyList()
+            return
+        }
+        symbolJob?.cancel()
+        symbolJob = viewModelScope.launch {
+            ensureIndex()
+            _symbolResults.value = symbolIndex.search(query)
+        }
+    }
+
+    /** Jump to the declaration under the caret in the active buffer. */
+    fun goToDefinition() {
+        val path = _state.value.activeTab?.path ?: return
+        val buffer = _buffers.value[path] ?: return
+        val caret = buffer.caret
+        viewModelScope.launch {
+            ensureIndex()
+            val definition = symbolIndex.definitionAt(path, caret)
+            if (definition == null) {
+                _message.value = "No declaration found for the symbol at the caret"
+                return@launch
+            }
+            if (definition.symbol.filePath == path) {
+                moveCaretTo(definition.line, definition.column)
+            } else {
+                openFileAtLine(definition.symbol.filePath, definition.line + 1)
+            }
+        }
+    }
+
+    /** Show every use of the symbol under the caret in the active buffer. */
+    fun findReferences() {
+        val path = _state.value.activeTab?.path ?: return
+        val buffer = _buffers.value[path] ?: return
+        val caret = buffer.caret
+        viewModelScope.launch {
+            ensureIndex()
+            val name = symbolIndex.identifierAt(path, caret)
+            if (name == null) {
+                _message.value = "Put the caret on a symbol to find its references"
+                return@launch
+            }
+            val found = symbolIndex.referencesTo(name)
+            _referenceTarget.value = name
+            _references.value = found
+            if (found.isEmpty()) _message.value = "No references to $name"
+        }
+    }
+
+    fun closeReferences() {
+        _referenceTarget.value = null
+        _references.value = emptyList()
+    }
+
+    private fun moveCaretTo(line: Int, column: Int) {
+        val path = _state.value.activeTab?.path ?: return
+        val buffer = _buffers.value[path] ?: return
+        val document = TextDocument.of(buffer.content)
+        val offset = (document.lineStart(line) + column).coerceIn(0, buffer.content.length)
+        setCaret(path, offset)
+        _revealRequests.value = _revealRequests.value + 1
     }
 
     /**
