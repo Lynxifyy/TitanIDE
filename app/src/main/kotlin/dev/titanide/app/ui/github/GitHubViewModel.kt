@@ -5,7 +5,9 @@ import androidx.lifecycle.viewModelScope
 import dev.titanide.app.di.TitanContainer
 import dev.titanide.core.data.files.ProjectDetector
 import dev.titanide.core.git.local.GitRepositoryService.Outcome
+import dev.titanide.core.ai.AiOutcome
 import dev.titanide.core.git.api.GitEntry
+import dev.titanide.core.model.DiffLineType
 import dev.titanide.core.model.BuildKind
 import dev.titanide.core.model.BuildRequest
 import dev.titanide.core.model.BuildResult
@@ -69,6 +71,8 @@ data class RepoDetailState(
     val importedProjectId: String? = null,
     val testResult: BuildResult? = null,
     val testing: Boolean = false,
+    val review: String? = null,
+    val reviewing: Boolean = false,
 )
 
 class GitHubViewModel(
@@ -153,12 +157,19 @@ class GitHubViewModel(
             val owner = fullName.substringBefore('/')
             val name = fullName.substringAfter('/')
             val repo = _list.value.repos.firstOrNull { it.fullName.equals(fullName, ignoreCase = true) }
-                ?: _list.value.repos.firstOrNull()
+                ?: container.gitHubApi.getRepository(owner, name).getOrNull()
+            if (repo == null) {
+                _detail.value = _detail.value.copy(
+                    loading = false,
+                    error = "Could not load $fullName",
+                )
+                return@launch
+            }
             val branches = container.gitHubApi.listBranches(owner, name).getOrDefault(emptyList())
             val commits = container.gitHubApi.listCommits(owner, name, repo?.defaultBranch).getOrDefault(emptyList())
             val entries = container.gitHubApi.listContents(owner, name, "").getOrDefault(emptyList())
             _detail.value = _detail.value.copy(
-                repo = repo?.copy(fullName = fullName),
+                repo = repo,
                 branches = branches,
                 commits = commits,
                 entries = entries,
@@ -261,6 +272,63 @@ class GitHubViewModel(
             )
             _detail.value = _detail.value.copy(testing = false, testResult = result)
         }
+    }
+
+    /**
+     * Reviews the working copy's changes with the project's own diff as the input.
+     *
+     * The diff is produced by git rather than assembled from the editor buffers, so what the
+     * model reads is what a reviewer would see. The AI call is only made when there is an
+     * actual change to review — reviewing an empty diff would burn a request to say nothing.
+     */
+    fun reviewChanges() {
+        val projectId = _detail.value.importedProjectId ?: return
+        if (_detail.value.reviewing) return
+        val root = container.storage.projectDir(projectId)
+        viewModelScope.launch {
+            _detail.value = _detail.value.copy(reviewing = true, review = null, error = null)
+            val diff = container.gitService.diff(root)
+            if (diff is Outcome.Failed) {
+                _detail.value = _detail.value.copy(
+                    reviewing = false,
+                    error = "Could not read the diff: ${diff.reason}",
+                )
+                return@launch
+            }
+            val text = (diff as Outcome.Ok).value
+                .joinToString("\n") { line ->
+                    when (line.type) {
+                        DiffLineType.ADDED -> "+${line.text}"
+                        DiffLineType.REMOVED -> "-${line.text}"
+                        else -> line.text
+                    }
+                }
+            if (text.isBlank()) {
+                _detail.value = _detail.value.copy(
+                    reviewing = false,
+                    review = "No changes to review yet. Commit or edit a file first.",
+                )
+                return@launch
+            }
+            val project = container.projectRepository.getProject(projectId)
+            if (project == null) {
+                _detail.value = _detail.value.copy(reviewing = false, error = "Project is no longer registered")
+                return@launch
+            }
+            val outcome = container.intelligence.reviewPullRequest(project, text)
+            _detail.value = _detail.value.copy(
+                reviewing = false,
+                review = when (outcome) {
+                    is AiOutcome.Answer -> outcome.text
+                    is AiOutcome.Edits -> outcome.explanation
+                    is AiOutcome.Failure -> "Review failed: ${outcome.reason}"
+                },
+            )
+        }
+    }
+
+    fun clearReview() {
+        _detail.value = _detail.value.copy(review = null)
     }
 
     fun clearError() {

@@ -18,6 +18,8 @@ import java.util.concurrent.TimeUnit
 class GitHubApiClient(
     private val tokenProvider: suspend () -> String?,
     private val http: OkHttpClient = defaultClient(),
+    /** Overridable so the client can be exercised against a local server in tests. */
+    private val apiBase: String = "https://api.github.com",
 ) {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -82,7 +84,7 @@ class GitHubApiClient(
         @SerialName("encoding") val encoding: String? = null,
     )
 
-    suspend fun currentUser(): Result<String> = call("https://api.github.com/user") { body ->
+    suspend fun currentUser(): Result<String> = call("$apiBase/user") { body ->
         json.decodeFromString(UserDto.serializer(), body).login
     }
 
@@ -91,14 +93,28 @@ class GitHubApiClient(
         perPage: Int = 50,
         sort: String = "updated",
     ): Result<List<GitRepository>> = call(
-        "https://api.github.com/user/repos?per_page=$perPage&page=$page&sort=$sort&affiliation=owner,collaborator,organization_member",
+        "$apiBase/user/repos?per_page=$perPage&page=$page&sort=$sort&affiliation=owner,collaborator,organization_member",
     ) { body ->
         json.decodeFromString(kotlinx.serialization.builtins.ListSerializer(RepoDto.serializer()), body)
             .map { it.toModel() }
     }
 
+    /**
+     * One repository by name.
+     *
+     * Needed because a repository can be opened from a link or from search results, and it is
+     * then not necessarily in the first page of the user's own repositories. Substituting
+     * whatever happened to be in that list showed the user another project's name, branch and
+     * language under the one they asked for.
+     */
+    suspend fun getRepository(owner: String, repo: String): Result<GitRepository> = call(
+        "$apiBase/repos/$owner/$repo",
+    ) { body ->
+        json.decodeFromString(RepoDto.serializer(), body).toModel()
+    }
+
     suspend fun searchRepositories(query: String, perPage: Int = 30): Result<List<GitRepository>> = call(
-        "https://api.github.com/search/repositories?q=${urlEncode(query)}&per_page=$perPage",
+        "$apiBase/search/repositories?q=${urlEncode(query)}&per_page=$perPage",
     ) { body ->
         val node = json.parseToJsonElement(body).jsonObject["items"] ?: return@call emptyList()
         json.decodeFromString(
@@ -108,7 +124,7 @@ class GitHubApiClient(
     }
 
     suspend fun listBranches(owner: String, repo: String): Result<List<GitBranch>> = call(
-        "https://api.github.com/repos/$owner/$repo/branches?per_page=100",
+        "$apiBase/repos/$owner/$repo/branches?per_page=100",
     ) { body ->
         json.decodeFromString(kotlinx.serialization.builtins.ListSerializer(BranchDto.serializer()), body)
             .map { GitBranch(name = it.name, isDefault = false, sha = it.commit.sha) }
@@ -116,7 +132,7 @@ class GitHubApiClient(
 
     suspend fun listCommits(owner: String, repo: String, branch: String? = null, perPage: Int = 30): Result<List<GitCommit>> {
         val ref = if (branch != null) "?sha=$branch&per_page=$perPage" else "?per_page=$perPage"
-        return call("https://api.github.com/repos/$owner/$repo/commits$ref") { body ->
+        return call("$apiBase/repos/$owner/$repo/commits$ref") { body ->
             json.decodeFromString(kotlinx.serialization.builtins.ListSerializer(CommitDto.serializer()), body)
                 .map { dto ->
                     GitCommit(
@@ -133,7 +149,7 @@ class GitHubApiClient(
     suspend fun listContents(owner: String, repo: String, path: String = "", ref: String? = null): Result<List<GitEntry>> {
         val suffix = if (ref != null) "?ref=$ref" else ""
         val encodedPath = path.split('/').filter { it.isNotEmpty() }.joinToString("/") { urlEncode(it) }
-        return call("https://api.github.com/repos/$owner/$repo/contents/$encodedPath$suffix") { body ->
+        return call("$apiBase/repos/$owner/$repo/contents/$encodedPath$suffix") { body ->
             json.decodeFromString(kotlinx.serialization.builtins.ListSerializer(ContentDto.serializer()), body)
                 .map { GitEntry(it.name, it.path, it.type == "dir", it.size) }
         }
@@ -142,7 +158,7 @@ class GitHubApiClient(
     suspend fun readFile(owner: String, repo: String, path: String, ref: String? = null): Result<String> {
         val suffix = if (ref != null) "?ref=$ref" else ""
         val encodedPath = path.split('/').filter { it.isNotEmpty() }.joinToString("/") { urlEncode(it) }
-        return call("https://api.github.com/repos/$owner/$repo/contents/$encodedPath$suffix") { body ->
+        return call("$apiBase/repos/$owner/$repo/contents/$encodedPath$suffix") { body ->
             val dto = json.decodeFromString(ContentDto.serializer(), body)
             val content = dto.content ?: return@call ""
             if (dto.encoding == "base64") {
@@ -155,7 +171,7 @@ class GitHubApiClient(
 
     /** Public tarball URL for a ref; used for one-tap import without a git clone. */
     fun tarballUrl(owner: String, repo: String, ref: String): String =
-        "https://api.github.com/repos/$owner/$repo/tarball/$ref"
+        "$apiBase/repos/$owner/$repo/tarball/$ref"
 
     suspend fun downloadTarball(owner: String, repo: String, ref: String, destination: java.io.File): Result<java.io.File> =
         withContext(Dispatchers.IO) {
@@ -199,7 +215,7 @@ class GitHubApiClient(
             append("}")
         }
         val request = Request.Builder()
-            .url("https://api.github.com/repos/$owner/$repo/pulls")
+            .url("$apiBase/repos/$owner/$repo/pulls")
             .header("Authorization", "Bearer $token")
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", "2022-11-28")
@@ -215,7 +231,7 @@ class GitHubApiClient(
         }
     }
 
-    suspend fun rateLimit(): Result<Int> = call("https://api.github.com/rate_limit") { body ->
+    suspend fun rateLimit(): Result<Int> = call("$apiBase/rate_limit") { body ->
         json.parseToJsonElement(body).jsonObject["rate"]?.jsonObject?.get("remaining")?.toString()?.toIntOrNull() ?: -1
     }
 

@@ -29,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -234,6 +235,35 @@ fun GitHubRepositoryScreen(
                             OutlinedButton(onClick = { state.importedProjectId?.let(onBuild) }) {
                                 Text("Open in Build")
                             }
+                        }
+                    }
+                }
+
+                Text("Review the changes", style = MaterialTheme.typography.titleSmall, color = TitanColors.TextPrimary)
+                Text(
+                    "Sends this repository's uncommitted diff to TITAN for a review. Nothing is " +
+                        "reviewed when there is no diff to send.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TitanColors.TextMuted,
+                )
+                OutlinedButton(onClick = viewModel::reviewChanges, enabled = !state.reviewing) {
+                    Text("Review changes with TITAN")
+                }
+                if (state.reviewing) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(13.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Reviewing...", style = MaterialTheme.typography.labelSmall, color = TitanColors.TextMuted)
+                    }
+                }
+                state.review?.let { review ->
+                    TitanCard(accent = TitanColors.Secondary) {
+                        Column(Modifier.padding(12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Review", style = MaterialTheme.typography.titleSmall, color = TitanColors.TextPrimary, modifier = Modifier.weight(1f))
+                                TextButton(onClick = viewModel::clearReview) { Text("Dismiss") }
+                            }
+                            Text(review, style = MaterialTheme.typography.bodySmall, color = TitanColors.TextMuted)
                         }
                     }
                 }
