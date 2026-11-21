@@ -323,6 +323,43 @@ class WorkbenchViewModelTest {
     }
 
     /**
+     * Undo history belongs to the file it was recorded against. A single shared stack means undo
+     * in a second file applies the first file's edit offsets to the second file's text, which
+     * rewrites text the user never touched in that file.
+     */
+    @Test
+    fun `undo in one file does not apply another file's edit`() = runBlocking {
+        val id = scaffoldProject("bench-undo-scope")
+        val viewModel = WorkbenchViewModel(container)
+        viewModel.awaitProject(id)
+
+        val files = withTimeout(10_000) {
+            viewModel.projectTree.first { tree ->
+                tree.flattened().count { !it.isDirectory && it.path.endsWith(".kt") } >= 2
+            }
+        }.flattened().filter { !it.isDirectory && it.path.endsWith(".kt") }.map { it.path }
+        val first = files[0]
+        val second = files[1]
+
+        viewModel.openFile(first)
+        withTimeout(10_000) { viewModel.buffers.first { it.containsKey(first) } }
+        // A long edit, so its offsets are far past the end of the shorter second file.
+        viewModel.edit(first, viewModel.buffers.value.getValue(first).content + "\n" + "x".repeat(400) + "\n")
+
+        viewModel.openFile(second)
+        withTimeout(10_000) { viewModel.buffers.first { it.containsKey(second) } }
+        withTimeout(10_000) { viewModel.state.first { it.activeTab?.path == second } }
+        val before = viewModel.buffers.value.getValue(second).content
+
+        viewModel.undo()
+        assertEquals(
+            "undo in a file with no edits of its own must leave that file alone",
+            before,
+            viewModel.buffers.value.getValue(second).content,
+        )
+    }
+
+    /**
      * Closing a tab is the only thing that discards a buffer, and the buffer is the only copy of
      * unsaved edits. Closing a dirty tab therefore asks first, and only the confirmed path drops
      * the work.

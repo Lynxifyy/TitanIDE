@@ -165,11 +165,15 @@ class WorkbenchViewModel(
     val buildLogs: StateFlow<Map<String, List<String>>> get() = container.buildEngine.logs
     val agent: StateFlow<OpenCodeState> get() = container.openCodeSession.state
 
-    private val undoStack = UndoStack()
+    /** Undo history is per file: an edit record's offsets only mean anything in its own buffer. */
+    private val undoStacks = java.util.concurrent.ConcurrentHashMap<String, UndoStack>()
+
+    private fun undoStackFor(path: String): UndoStack =
+        undoStacks.computeIfAbsent(path) { UndoStack() }
     private val searchEngine = SearchEngine()
-    private var analysisJob: Job? = null
+    /** Debounce handles are per file, so work queued for one file is never cancelled by another. */
+    private val debounceJobs = java.util.concurrent.ConcurrentHashMap<String, Job>()
     private var searchJob: Job? = null
-    private var autoSaveJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -214,7 +218,7 @@ class WorkbenchViewModel(
     private fun loadProject(project: Project) {
         _project.value = project
         _buffers.value = emptyMap()
-        undoStack.clear()
+        undoStacks.clear()
         _diagnostics.value = emptyList()
         _state.update {
             it.copy(
@@ -338,6 +342,9 @@ class WorkbenchViewModel(
         _state.value = _state.value.closeTab(tabId)
         _buffers.value = _buffers.value - tabId
         diagnosticsByPath.remove(tabId)
+        undoStacks.remove(tabId)
+        debounceJobs.remove("analyze:$tabId")?.cancel()
+        debounceJobs.remove("save:$tabId")?.cancel()
         analyzeJobs.remove(tabId)?.cancel()
         _state.value.activeTab?.path?.let(::publishActive)
     }
@@ -381,22 +388,22 @@ class WorkbenchViewModel(
             if (caret >= 0) setCaret(path, caret)
             return
         }
-        TextDiff.singleEdit(buffer.content, content)?.let(undoStack::record)
+        TextDiff.singleEdit(buffer.content, content)?.let(undoStackFor(path)::record)
         val updated = buffer.copy(content = content, caret = if (caret >= 0) caret else buffer.caret)
         _buffers.value = _buffers.value + (path to updated)
         _state.value = _state.value.setDirty(path, updated.dirty)
         publishActive(path)
 
-        analysisJob?.cancel()
-        analysisJob = viewModelScope.launch {
+        debounceJobs.remove("analyze:$path")?.cancel()
+        debounceJobs["analyze:$path"] = viewModelScope.launch {
             delay(350)
             analyze(updated)
         }
 
         val editorSettings = container.currentSettings()?.editor
         if (editorSettings?.autoSave ?: true) {
-            autoSaveJob?.cancel()
-            autoSaveJob = viewModelScope.launch {
+            debounceJobs.remove("save:$path")?.cancel()
+            debounceJobs["save:$path"] = viewModelScope.launch {
                 delay((editorSettings?.autoSaveDelayMs ?: 1_200L).coerceIn(300L, 10_000L))
                 save(path, silent = true)
             }
@@ -449,14 +456,14 @@ class WorkbenchViewModel(
     fun undo() {
         val path = _state.value.activeTab?.path ?: return
         val buffer = _buffers.value[path] ?: return
-        val previous = undoStack.undo(TextDocument.of(buffer.content)) ?: return
+        val previous = undoStackFor(path).undo(TextDocument.of(buffer.content)) ?: return
         applyText(path, previous.text)
     }
 
     fun redo() {
         val path = _state.value.activeTab?.path ?: return
         val buffer = _buffers.value[path] ?: return
-        val next = undoStack.redo(TextDocument.of(buffer.content)) ?: return
+        val next = undoStackFor(path).redo(TextDocument.of(buffer.content)) ?: return
         applyText(path, next.text)
     }
 
@@ -491,7 +498,7 @@ class WorkbenchViewModel(
     }
 
     private fun applyTransform(path: String, transform: EditorEngine.Transform) {
-        transform.edit?.let(undoStack::record)
+        transform.edit?.let(undoStackFor(path)::record)
         val buffer = _buffers.value[path] ?: return
         val updated = buffer.copy(content = transform.document.text, caret = transform.caret)
         _buffers.value = _buffers.value + (path to updated)

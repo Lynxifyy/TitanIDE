@@ -195,4 +195,30 @@ class WorkbenchAutoSaveTest {
             viewModel.buffers.value.getValue(path).dirty,
         )
     }
+
+    /**
+     * Auto-save is armed per keystroke, and each file's pending timer is its own. A single shared
+     * job handle means editing a second file cancels the first file's pending write, so the first
+     * file stays unsaved until something else touches it.
+     */
+    @Test
+    fun `editing a second file does not cancel the first file's pending save`() = runBlocking {
+        container.settings.updateEditor { it.copy(autoSave = true, autoSaveDelayMs = 1_200) }
+        val project = container.projectRepository.getProject(projectId)!!
+        val first = "first.txt"
+        val second = "second.txt"
+        container.fileTreeRepository.write(project, second, "second original\n")
+        val viewModel = openedWorkbench(first, "first original\n")
+
+        viewModel.edit(first, "first edited\n")
+        viewModel.openFile(second)
+        val openDeadline = System.currentTimeMillis() + 20_000
+        while (viewModel.buffers.value[second] == null && System.currentTimeMillis() < openDeadline) {
+            Thread.sleep(25)
+        }
+        viewModel.edit(second, "second edited\n")
+
+        awaitWritten(File(project.rootPath, first), "first edited\n")
+        awaitWritten(File(project.rootPath, second), "second edited\n")
+    }
 }
