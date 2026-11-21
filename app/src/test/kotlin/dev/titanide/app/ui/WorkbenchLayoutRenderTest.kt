@@ -3,9 +3,10 @@ package dev.titanide.app.ui
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
-import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.LocalContainer
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.testing.CloseContainersRule
+import dev.titanide.app.testing.TestContainers
 import dev.titanide.app.testing.ViewModelTracker
 import dev.titanide.app.testing.resetMainDispatcher
 import dev.titanide.app.ui.workbench.WorkbenchScreen
@@ -26,12 +27,14 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33])
 class WorkbenchLayoutRenderTest {
+    @get:Rule
+    val containers = CloseContainersRule()
 
     @get:Rule
     val compose = createComposeRule()
 
     private fun renderAt(qualifiers: String) {
-        val container = TitanContainer(ApplicationProvider.getApplicationContext())
+        val container = TestContainers.create()
         // Constructed outside the composition so lint's ViewModelConstructorInComposable
         // rule stays clean, and so the same instance survives recomposition.
         val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))

@@ -1,7 +1,8 @@
 package dev.titanide.app.ui.workbench
 
-import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.testing.CloseContainersRule
+import dev.titanide.app.testing.TestContainers
 import dev.titanide.app.testing.ViewModelTracker
 import dev.titanide.app.testing.resetMainDispatcher
 import dev.titanide.app.ui.create.CreateProjectViewModel
@@ -15,6 +16,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -31,13 +33,16 @@ import java.io.File
 @Config(sdk = [33])
 class WorkbenchAutoSaveTest {
 
+    @get:Rule
+    val containers = CloseContainersRule()
+
     private lateinit var container: TitanContainer
     private lateinit var projectId: String
 
     @Before
     fun setUp() = runBlocking {
         Dispatchers.setMain(Dispatchers.Default)
-        container = TitanContainer(ApplicationProvider.getApplicationContext())
+        container = TestContainers.create()
         container.settings.updateEditor { it.copy(autoSave = true, autoSaveDelayMs = 1_200) }
         val wizard = ViewModelTracker.track(CreateProjectViewModel(container))
         wizard.setName("WorkbenchSave")

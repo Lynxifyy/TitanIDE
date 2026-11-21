@@ -1,7 +1,8 @@
 package dev.titanide.app.ui.workbench
 
-import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.testing.CloseContainersRule
+import dev.titanide.app.testing.TestContainers
 import dev.titanide.app.testing.ViewModelTracker
 import dev.titanide.app.testing.resetMainDispatcher
 import dev.titanide.app.ui.create.CreateProjectViewModel
@@ -15,6 +16,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Rule
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -30,6 +32,9 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33])
 class OpenChosenProjectTest {
+
+    @get:Rule
+    val containers = CloseContainersRule()
 
     private lateinit var container: TitanContainer
     private lateinit var recentId: String
@@ -52,7 +57,7 @@ class OpenChosenProjectTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(Dispatchers.Default)
-        container = TitanContainer(ApplicationProvider.getApplicationContext())
+        container = TestContainers.create()
         olderId = scaffold("ChosenOlder")
         recentId = scaffold("ChosenRecent")
         runBlocking { container.projectRepository.touch(recentId) }

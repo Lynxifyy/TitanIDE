@@ -44,6 +44,7 @@ import dev.titanide.core.opencode.setup.OpenCodeDiscovery
 import dev.titanide.core.templates.GeneratorRegistry
 import dev.titanide.core.templates.ProjectScaffolder
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
@@ -76,13 +77,15 @@ class TitanContainer(
 
     val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    val database: TitanDatabase by lazy {
+    private val databaseDelegate = lazy {
         Room.databaseBuilder(context, TitanDatabase::class.java, "titan.db")
             // No destructive fallback: projects, build history and open tabs are user data,
             // so an unhandled schema change must fail loudly instead of wiping the database.
             .addMigrations(*TitanMigrations.ALL)
             .build()
     }
+
+    val database: TitanDatabase by databaseDelegate
 
     val storage: ProjectStorage by lazy { ProjectStorage(context) }
 
@@ -403,4 +406,17 @@ class TitanContainer(
     fun storageUsedBytes(): Long = storage.usedBytes()
 
     fun currentSettings(): TitanSettings? = settingsState.value
+
+    /**
+     * Releases the resources this container owns: the background scope and the database.
+     *
+     * Only the database is closed when it was actually opened, so a container that never
+     * touched storage does not create one on the way out. Unit tests build a container per
+     * class; without this, every class left an open SQLite connection behind and a later
+     * class eventually failed with SQLITE_BUSY.
+     */
+    fun close() {
+        appScope.cancel()
+        if (databaseDelegate.isInitialized()) databaseDelegate.value.close()
+    }
 }

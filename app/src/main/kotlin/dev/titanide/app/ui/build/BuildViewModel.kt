@@ -28,7 +28,12 @@ data class BuildUiState(
     val message: String? = null,
 )
 
-class BuildViewModel(private val container: TitanContainer, initialProjectId: String) : ViewModel() {
+class BuildViewModel(
+    private val container: TitanContainer,
+    initialProjectId: String,
+    /** Seam for tests that need to control what probing returns. */
+    private val probe: suspend () -> ToolchainReport = { container.toolchainProbe.probeAll() },
+) : ViewModel() {
 
     private val _state = MutableStateFlow(BuildUiState())
     val state: StateFlow<BuildUiState> = _state.asStateFlow()
@@ -107,8 +112,16 @@ class BuildViewModel(private val container: TitanContainer, initialProjectId: St
         if (_state.value.probing) return
         _state.update { it.copy(probing = true) }
         viewModelScope.launch {
-            val report = runCatching { container.toolchainProbe.probeAll() }.getOrNull()
-            _state.update { it.copy(toolchains = report, probing = false) }
+            try {
+                val report = probe()
+                _state.update { it.copy(toolchains = report, probing = false, message = null) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(probing = false, message = "Toolchain probe failed: ${e.message ?: "unknown error"}")
+                }
+            }
         }
     }
 

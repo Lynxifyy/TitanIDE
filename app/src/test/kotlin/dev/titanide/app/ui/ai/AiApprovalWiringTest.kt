@@ -1,7 +1,8 @@
 package dev.titanide.app.ui.ai
 
-import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.testing.CloseContainersRule
+import dev.titanide.app.testing.TestContainers
 import dev.titanide.app.testing.ViewModelTracker
 import dev.titanide.app.testing.resetMainDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -17,6 +18,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -34,7 +36,10 @@ import org.robolectric.annotation.Config
 @Config(sdk = [33])
 class AiApprovalWiringTest {
 
-    private val container = TitanContainer(ApplicationProvider.getApplicationContext())
+    @get:Rule
+    val containers = CloseContainersRule()
+
+    private val container = TestContainers.create()
     private val args = JsonObject(mapOf("path" to JsonPrimitive("Main.kt")))
 
     @Before

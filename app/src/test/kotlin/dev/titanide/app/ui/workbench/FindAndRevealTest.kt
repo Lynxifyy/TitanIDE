@@ -1,7 +1,8 @@
 package dev.titanide.app.ui.workbench
 
-import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.testing.CloseContainersRule
+import dev.titanide.app.testing.TestContainers
 import dev.titanide.app.testing.ViewModelTracker
 import dev.titanide.app.testing.resetMainDispatcher
 import dev.titanide.core.templates.CreateProjectOutcome
@@ -16,6 +17,7 @@ import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -32,12 +34,15 @@ import java.io.File
 @Config(sdk = [33])
 class FindAndRevealTest {
 
+    @get:Rule
+    val containers = CloseContainersRule()
+
     private lateinit var container: TitanContainer
 
     @Before
     fun setUp() {
         Dispatchers.setMain(Dispatchers.Default)
-        container = TitanContainer(ApplicationProvider.getApplicationContext())
+        container = TestContainers.create()
     }
 
     @After

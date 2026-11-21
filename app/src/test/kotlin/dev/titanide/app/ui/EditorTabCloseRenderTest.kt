@@ -6,9 +6,10 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import android.os.Looper
-import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.LocalContainer
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.testing.CloseContainersRule
+import dev.titanide.app.testing.TestContainers
 import dev.titanide.app.testing.ViewModelTracker
 import dev.titanide.app.testing.resetMainDispatcher
 import dev.titanide.app.ui.workbench.WorkbenchScreen
@@ -36,6 +37,8 @@ import java.io.File
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33])
 class EditorTabCloseRenderTest {
+    @get:Rule
+    val containers = CloseContainersRule()
 
     @get:Rule
     val compose = createComposeRule()
@@ -55,7 +58,7 @@ class EditorTabCloseRenderTest {
 
     @Test
     fun `a dirty tab keeps a working close button`() {
-        val container = TitanContainer(ApplicationProvider.getApplicationContext())
+        val container = TestContainers.create()
         val id = "tab-close"
         // Scaffolding is file I/O only, so blocking here does not starve the main looper.
         val project = runBlocking {

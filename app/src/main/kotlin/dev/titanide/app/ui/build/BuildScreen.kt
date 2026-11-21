@@ -66,7 +66,19 @@ fun BuildScreen(
     onOpenAi: () -> Unit,
 ) {
     val container = LocalContainer.current
-    val viewModel: BuildViewModel = viewModel { BuildViewModel(container, projectId) }
+    BuildScreen(
+        viewModel = viewModel { BuildViewModel(container, projectId) },
+        onBack = onBack,
+        onOpenAi = onOpenAi,
+    )
+}
+
+@Composable
+fun BuildScreen(
+    viewModel: BuildViewModel,
+    onBack: () -> Unit,
+    onOpenAi: () -> Unit,
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
     Column(Modifier.fillMaxSize()) {
@@ -152,6 +164,15 @@ fun BuildScreen(
 
             state.message?.let {
                 Text(it, color = TitanColors.Warning, style = MaterialTheme.typography.labelSmall)
+            }
+
+            state.toolchains?.let { report ->
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "${report.availableCount} of ${report.tools.size} available on this device",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (report.availableCount == 0) TitanColors.Warning else TitanColors.TextMuted,
+                )
             }
 
             Spacer(Modifier.height(8.dp))

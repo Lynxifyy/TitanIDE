@@ -1,7 +1,8 @@
 package dev.titanide.app.extensions
 
-import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.testing.CloseContainersRule
+import dev.titanide.app.testing.TestContainers
 import dev.titanide.core.data.db.ExtensionEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -11,6 +12,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -28,12 +30,15 @@ import org.robolectric.annotation.Config
 @Config(sdk = [33])
 class CapabilityGateTest {
 
+    @get:Rule
+    val containers = CloseContainersRule()
+
     private lateinit var container: TitanContainer
 
     @Before
     fun setUp() {
         Dispatchers.setMain(Dispatchers.Default)
-        container = TitanContainer(ApplicationProvider.getApplicationContext())
+        container = TestContainers.create()
     }
 
     @After

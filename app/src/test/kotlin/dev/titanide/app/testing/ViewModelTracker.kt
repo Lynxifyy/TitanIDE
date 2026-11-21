@@ -1,8 +1,12 @@
 package dev.titanide.app.testing
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Cancels the ViewModels a test created.
@@ -38,7 +42,13 @@ object ViewModelTracker {
             live.clear()
             copy
         }
+        // Capture the scope jobs first: clear() only *requests* cancellation, and a Room query
+        // still in flight would then race the database close in a later teardown step.
+        val jobs = pending.mapNotNull { viewModel ->
+            runCatching { viewModel.viewModelScope.coroutineContext[Job] }.getOrNull()
+        }
         pending.forEach { viewModel -> clearMethod.invoke(viewModel) }
+        runBlocking { withTimeoutOrNull(5_000) { jobs.forEach { it.join() } } }
     }
 }
 

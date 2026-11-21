@@ -4,9 +4,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
-import androidx.test.core.app.ApplicationProvider
 import dev.titanide.app.LocalContainer
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.testing.CloseContainersRule
+import dev.titanide.app.testing.TestContainers
 import dev.titanide.app.testing.ViewModelTracker
 import dev.titanide.app.testing.resetMainDispatcher
 import dev.titanide.app.ui.ai.AiStudioScreen
@@ -47,12 +48,14 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33], qualifiers = "w411dp-h891dp-xhdpi")
 class ScreenRenderTest {
+    @get:Rule
+    val containers = CloseContainersRule()
 
     @get:Rule
     val compose = createComposeRule()
 
     private fun render(screen: @Composable () -> Unit) =
-        renderWith(TitanContainer(ApplicationProvider.getApplicationContext()), screen)
+        renderWith(TestContainers.create(), screen)
 
     private fun renderWith(container: TitanContainer, screen: @Composable () -> Unit) {
         compose.setContent {
@@ -90,7 +93,7 @@ class ScreenRenderTest {
 
     @Test
     fun workbenchRenders() {
-        val container = TitanContainer(ApplicationProvider.getApplicationContext())
+        val container = TestContainers.create()
         val viewModel = ViewModelTracker.track(WorkbenchViewModel(container))
         renderWith(container) {
             WorkbenchScreen(viewModel = viewModel, onOpenSettings = {}, onOpenProjects = {})
