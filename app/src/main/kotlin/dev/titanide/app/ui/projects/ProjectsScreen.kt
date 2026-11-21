@@ -49,6 +49,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.titanide.app.LocalContainer
 import dev.titanide.app.ui.common.TitanTopBar
 import dev.titanide.app.ui.common.formatRelativeTime
+import dev.titanide.app.ui.common.TitanErrorBanner
 import dev.titanide.core.designsystem.TitanColors
 import dev.titanide.core.designsystem.components.EmptyState
 import dev.titanide.core.designsystem.components.MonogramBadge
@@ -121,10 +122,9 @@ fun ProjectsScreen(
             }
 
             state.error?.let { message ->
-                Text(
-                    message,
-                    color = TitanColors.Error,
-                    style = MaterialTheme.typography.bodySmall,
+                TitanErrorBanner(
+                    message = message,
+                    onDismiss = viewModel::clearError,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
                 )
             }

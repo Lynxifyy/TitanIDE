@@ -51,6 +51,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.titanide.app.LocalContainer
 import dev.titanide.app.ui.common.DetailRow
 import dev.titanide.app.ui.common.TitanTopBar
+import dev.titanide.app.ui.common.TitanErrorBanner
 import dev.titanide.core.designsystem.TitanColors
 import dev.titanide.core.designsystem.components.MonogramBadge
 import dev.titanide.core.designsystem.components.StatusPill
@@ -92,17 +93,11 @@ fun CreateProjectScreen(
         )
 
         state.error?.let { message ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(TitanColors.Error.copy(alpha = 0.12f))
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Filled.Warning, contentDescription = null, tint = TitanColors.Error, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(message, style = MaterialTheme.typography.bodySmall, color = TitanColors.Error)
-            }
+            TitanErrorBanner(
+                message = message,
+                onDismiss = viewModel::clearError,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
         }
 
         Box(Modifier.weight(1f)) {
