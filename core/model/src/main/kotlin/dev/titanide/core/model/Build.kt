@@ -88,6 +88,8 @@ data class BuildResult(
     val testSummary: TestSummary? = null,
     val failureReason: String? = null,
     val executorLabel: String = "",
+    /** Detected project shape, e.g. "ANDROID_APP" or "JVM"; null when not determined. */
+    val projectKind: String? = null,
 ) {
     val durationMs: Long get() = (finishedAt ?: System.currentTimeMillis()) - startedAt
     val errorCount: Int get() = diagnostics.count { it.severity == Severity.ERROR }

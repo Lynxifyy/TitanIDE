@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import dev.titanide.app.di.TitanContainer
 import dev.titanide.core.data.files.SafeFileSystem
 import dev.titanide.core.editor.codeguard.CodeGuard
+import dev.titanide.core.engine.InstallOutcome
 import dev.titanide.core.editor.EditorEngine
 import dev.titanide.core.editor.SearchEngine
 import dev.titanide.core.editor.SearchOptions
@@ -93,6 +94,12 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
 
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
+
+    private val _installInProgress = MutableStateFlow(false)
+    val installInProgress: StateFlow<Boolean> = _installInProgress.asStateFlow()
+
+    private val _lastInstalledPackage = MutableStateFlow<String?>(null)
+    val lastInstalledPackage: StateFlow<String?> = _lastInstalledPackage.asStateFlow()
 
     val build: StateFlow<BuildResult?> get() = container.buildEngine.lastResult
     val buildLogs: StateFlow<Map<String, List<String>>> get() = container.buildEngine.logs
@@ -448,6 +455,60 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
 
     fun stopBuild() {
         _project.value?.let { container.buildEngine.stop(it.id) }
+    }
+
+    // ---------------------------------------------------------------- install
+
+    /**
+     * Installs the APK produced by the last build, then offers to launch it.
+     *
+     * The APK comes from the build result rather than a guessed path, so what is installed
+     * is exactly what the engine produced. Every failure is reported with the package
+     * manager's own reason; nothing is reported as installed until Android confirms it.
+     */
+    fun installLastBuildApk() {
+        val result = build.value
+        if (result == null) {
+            _message.value = "Build the project first: there is no APK to install."
+            return
+        }
+        val apk = result.artifacts.firstOrNull { it.name.endsWith(".apk", ignoreCase = true) }
+        if (apk == null) {
+            _message.value = "The last build produced no APK. An Android application build " +
+                "is required."
+            return
+        }
+        if (_installInProgress.value) return
+        _installInProgress.value = true
+        viewModelScope.launch {
+            try {
+                when (val outcome = container.apkInstaller.install(java.io.File(apk.path))) {
+                    is InstallOutcome.Installed -> {
+                        _lastInstalledPackage.value = outcome.packageName
+                        _message.value = "Installed ${outcome.packageName} " +
+                            "${outcome.versionName.orEmpty()}".trim()
+                    }
+                    is InstallOutcome.NeedsUserConsent -> {
+                        _message.value = outcome.reason
+                        container.apkInstaller.openInstallPermissionSettings()
+                    }
+                    is InstallOutcome.Rejected ->
+                        _message.value = "Install failed: ${outcome.message}"
+                    is InstallOutcome.InvalidArtifact ->
+                        _message.value = outcome.reason
+                }
+            } finally {
+                _installInProgress.value = false
+            }
+        }
+    }
+
+    /** Launches the package installed by [installLastBuildApk], if it has a launcher. */
+    fun launchInstalledApp() {
+        val packageName = _lastInstalledPackage.value ?: return
+        if (!container.apkInstaller.launch(packageName)) {
+            _message.value = "$packageName has no launcher activity to start."
+        }
     }
 
     fun selectBottomTool(tool: BottomTool) {

@@ -1,0 +1,134 @@
+# Build workflow dispatched by TITAN IDE's GitHub Actions backend.
+#
+# The app posts to /repos/{owner}/{repo}/actions/workflows/titan-build.yml/dispatches with
+# three inputs (kind, task, build_system). This file must therefore declare
+# `workflow_dispatch` with exactly those inputs, or every remote build from the app fails
+# with HTTP 422.
+#
+# The `task` input is a full command line such as `./gradlew assembleDebug --console=plain`,
+# planned by the app from the project's real build scripts. It is executed as given rather
+# than re-derived here, so the remote build runs the same command the device would have run.
+name: TITAN Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: 'Build kind: BUILD, CLEAN, REBUILD, TEST or RUN'
+        required: false
+        default: BUILD
+        type: choice
+        options: [BUILD, CLEAN, REBUILD, TEST, RUN]
+      task:
+        description: 'Command line to execute (for example ./gradlew assembleDebug)'
+        required: false
+        default: ''
+        type: string
+      build_system:
+        description: 'Detected build system: gradle, npm, cargo, go, cmake, make, pip, maven, none'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: titan-build-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.daemon=false
+
+jobs:
+  build:
+    name: Build (${{ inputs.kind || 'BUILD' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Report the request
+        run: |
+          echo "kind=${{ inputs.kind }}"
+          echo "build_system=${{ inputs.build_system }}"
+          echo "task=${{ inputs.task }}"
+
+      - name: Set up JDK 17
+        if: inputs.build_system == 'gradle' || inputs.build_system == 'maven'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Node.js
+        if: inputs.build_system == 'npm'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Python
+        if: inputs.build_system == 'pip'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Go
+        if: inputs.build_system == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Set up Rust
+        if: inputs.build_system == 'cargo'
+        uses: dtolnay/rust-toolchain@stable
+
+      # The Android SDK is only needed for an Android Gradle build. Detecting that from the
+      # project rather than always installing it keeps non-Android builds fast.
+      - name: Detect Android Gradle project
+        id: android
+        if: inputs.build_system == 'gradle'
+        run: |
+          if grep -rqE 'com\.android\.(application|library)' --include='build.gradle*' .; then
+            echo "is_android=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_android=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Android SDK
+        if: steps.android.outputs.is_android == 'true'
+        uses: android-actions/setup-android@v3
+
+      - name: Make the Gradle wrapper executable
+        if: inputs.build_system == 'gradle'
+        run: chmod +x ./gradlew || true
+
+      # The planned command is executed verbatim. When the app could not plan one (for
+      # example an unrecognised build system) the step fails loudly instead of guessing.
+      - name: Run the planned task
+        run: |
+          set -o pipefail
+          if [ -z "${{ inputs.task }}" ]; then
+            echo "::error::No task was supplied by TITAN IDE, so there is nothing to run."
+            exit 1
+          fi
+          bash -c "${{ inputs.task }}"
+
+      # Uploading everything the build produced lets the app download a real APK/JAR
+      # instead of only reporting a green tick.
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: titan-build-output
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            **/build/outputs/apk/**/*.apk
+            **/build/outputs/aar/**/*.aar
+            **/build/libs/**/*.jar
+            **/build/distributions/*.zip
+            **/target/release/*
+            **/dist/*
+            **/bin/**/*.dll

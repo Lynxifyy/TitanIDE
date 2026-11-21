@@ -35,6 +35,9 @@ dependencies {
     api(libs.kotlinx.coroutines.android)
     api(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
+    // ContextCompat.registerReceiver: the flag-less overload is deprecated and the
+    // exported/not-exported flag is required from API 33 onward.
+    implementation(libs.androidx.core.ktx)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

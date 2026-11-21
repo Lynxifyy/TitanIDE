@@ -2,6 +2,8 @@ package dev.titanide.core.data.db
 
 import androidx.room.Dao
 import androidx.room.Database
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.room.Entity
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -49,6 +51,15 @@ data class BuildRecordEntity(
     val testsFailed: Int,
     val logPath: String?,
     val failureReason: String?,
+    /**
+     * JSON of the produced artifacts and parsed diagnostics. Both are needed after a
+     * restart: without the artifacts the built APK cannot be installed from history, and
+     * without the diagnostics the error list is empty until the project is rebuilt.
+     */
+    val artifactsJson: String? = null,
+    val diagnosticsJson: String? = null,
+    /** Which project shape the build ran against, e.g. "ANDROID_APP" or "JVM". */
+    val projectKind: String? = null,
 )
 
 @Entity(tableName = "open_tabs")
@@ -212,6 +223,34 @@ interface HttpRequestDao {
     suspend fun delete(id: String)
 }
 
+/**
+ * Every schema change ships a migration.
+ *
+ * The database holds projects, build history and open tabs, so a destructive fallback
+ * silently deletes the user's workspace on upgrade. Each step here is additive and
+ * forward-only, which is what Room requires.
+ */
+object TitanMigrations {
+
+    /**
+     * 1 -> 2: persist artifacts, diagnostics and the detected project kind with each build.
+     *
+     * All three columns are nullable, so existing rows stay valid without a default and no
+     * table rebuild is needed. `ALTER TABLE ... ADD COLUMN` is supported by every SQLite
+     * version Android ships.
+     */
+    val MIGRATION_1_2 = object : Migration(1, 2) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE build_history ADD COLUMN artifactsJson TEXT")
+            db.execSQL("ALTER TABLE build_history ADD COLUMN diagnosticsJson TEXT")
+            db.execSQL("ALTER TABLE build_history ADD COLUMN projectKind TEXT")
+        }
+    }
+
+    /** All migrations, in order, for [androidx.room.RoomDatabase.Builder.addMigrations]. */
+    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2)
+}
+
 @Database(
     entities = [
         ProjectEntity::class,
@@ -220,7 +259,7 @@ interface HttpRequestDao {
         ExtensionEntity::class,
         HttpRequestEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class TitanDatabase : RoomDatabase() {

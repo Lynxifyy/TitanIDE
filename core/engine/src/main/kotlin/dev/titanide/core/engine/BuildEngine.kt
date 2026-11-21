@@ -35,6 +35,8 @@ data class BackendOutcome(
     val stages: List<BuildStage>,
     val failureReason: String?,
     val executorLabel: String,
+    /** Detected project shape, so the result records what was actually built. */
+    val projectKind: String? = null,
 )
 
 /**
@@ -44,6 +46,8 @@ data class BackendOutcome(
 class LocalBuildBackend(
     private val runner: ProcessRunner,
     private val fs: SafeFileSystem = SafeFileSystem(),
+    /** Called before a process starts so the engine can scope Stop to this project. */
+    private val onSessionStarted: (projectId: String, sessionId: String) -> Unit = { _, _ -> },
 ) : BuildBackend {
 
     override val target = ExecutionTarget.LOCAL
@@ -62,6 +66,11 @@ class LocalBuildBackend(
 
         val stages = ArrayList<BuildStage>()
         val allLines = ArrayList<String>()
+
+        plan.notes.forEach { note ->
+            allLines += note
+            onLog(note)
+        }
 
         for (command in plan.commands) {
             val toolAvailable = toolExists(command.program)
@@ -84,8 +93,10 @@ class LocalBuildBackend(
 
             onLog("> ${command.display}")
             val stageStart = System.currentTimeMillis()
+            val sessionId = request.projectId + "-" + command.stageName
+            onSessionStarted(request.projectId, sessionId)
             val outcome = runner.run(
-                sessionId = request.projectId + "-" + command.stageName,
+                sessionId = sessionId,
                 command = listOf(command.program) + command.args,
                 workingDir = root,
                 environment = request.environment,
@@ -154,6 +165,7 @@ class LocalBuildBackend(
             stages = stages,
             failureReason = null,
             executorLabel = "On device",
+            projectKind = plan.projectKind,
         )
     }
 
@@ -239,6 +251,10 @@ data class BuildPlan(
     val commands: List<PlannedCommand>,
     val artifactGlobs: List<String>,
     val error: String? = null,
+    /** Explanation of how the plan was chosen, shown at the top of the build log. */
+    val notes: List<String> = emptyList(),
+    /** Detected project shape for Gradle projects; null for other build systems. */
+    val projectKind: String? = null,
 )
 
 /**
@@ -271,12 +287,29 @@ object BuildPlanner {
             )
         }
 
+        // Gradle needs the project's real shape: assembleDebug does not exist in a plain
+        // JVM or Compose Multiplatform build, so the task names are resolved from the
+        // build scripts rather than assumed to be Android.
+        val gradleTasks = if (system == "gradle") GradleTaskPlanner.plan(root) else null
+
+        if (gradleTasks != null && request.kind == BuildKind.RUN && gradleTasks.runTask == null) {
+            return BuildPlan(
+                commands = emptyList(),
+                artifactGlobs = gradleTasks.artifactGlobs,
+                error = "This Gradle project has no runnable entry point " +
+                    "(${gradleTasks.evidence}). Install the built artifact instead.",
+            )
+        }
+
         val tasks = when (request.kind) {
-            BuildKind.CLEAN -> listOf(cleanTask(system))
-            BuildKind.BUILD -> listOf(primaryTask(system))
-            BuildKind.REBUILD -> listOf(cleanTask(system), primaryTask(system))
-            BuildKind.TEST -> listOf(testTask(system))
-            BuildKind.RUN -> listOf(runTask(system))
+            BuildKind.CLEAN -> listOf(gradleTasks?.cleanTask ?: cleanTask(system))
+            BuildKind.BUILD -> listOf(gradleTasks?.buildTasks?.firstOrNull() ?: primaryTask(system))
+            BuildKind.REBUILD -> listOf(
+                gradleTasks?.cleanTask ?: cleanTask(system),
+                gradleTasks?.buildTasks?.firstOrNull() ?: primaryTask(system),
+            )
+            BuildKind.TEST -> listOf(gradleTasks?.testTasks?.firstOrNull() ?: testTask(system))
+            BuildKind.RUN -> listOf(gradleTasks?.runTask ?: runTask(system))
             BuildKind.STOP -> return BuildPlan(emptyList(), emptyList(), "STOP is handled by cancelling the running build")
         }
 
@@ -302,7 +335,13 @@ object BuildPlanner {
             return BuildPlan(emptyList(), emptyList(), "No runnable command for $system/${request.kind}")
         }
 
-        return BuildPlan(commands = commands, artifactGlobs = artifactGlobs(system))
+        return BuildPlan(
+            commands = commands,
+            artifactGlobs = gradleTasks?.artifactGlobs ?: artifactGlobs(system),
+            // Carried into the build log so the chosen tasks are explained, not guessed at.
+            notes = listOfNotNull(gradleTasks?.evidence),
+            projectKind = gradleTasks?.kind?.name,
+        )
     }
 
     private fun primaryTask(system: String): String = when (system) {
@@ -428,7 +467,18 @@ class BuildEngine(
     private val _lastResult = MutableStateFlow<BuildResult?>(null)
     val lastResult: StateFlow<BuildResult?> = _lastResult.asStateFlow()
 
-    private val jobs = HashMap<String, Job>()
+    /** Guarded by its own lock: start/stop can be called from different threads. */
+    private val jobs = java.util.concurrent.ConcurrentHashMap<String, Job>()
+
+    /** Session ids owned by each project, so Stop only cancels that project's process. */
+    private val sessionsByProject = java.util.concurrent.ConcurrentHashMap<String, MutableSet<String>>()
+
+    /** Records a session against a project so [stop] can cancel exactly that process. */
+    fun registerSession(projectId: String, sessionId: String) {
+        sessionsByProject
+            .getOrPut(projectId) { java.util.concurrent.ConcurrentHashMap.newKeySet() }
+            .add(sessionId)
+    }
 
     fun backendFor(target: ExecutionTarget): BuildBackend? = when (target) {
         ExecutionTarget.LOCAL -> localBackend
@@ -472,10 +522,12 @@ class BuildEngine(
         _logs.value = _logs.value + (buildId to emptyList())
 
         val job = scope.launch(Dispatchers.IO) {
-            val collected = ArrayList<String>()
+            // The backend calls onLog from a process-reader thread, so the buffer must be
+            // guarded; a plain ArrayList here can lose or corrupt lines under load.
+            val collected = java.util.Collections.synchronizedList(ArrayList<String>())
             val outcome = try {
                 backend.execute(request) { line ->
-                    collected += line
+                    collected.add(line)
                     _logs.value = _logs.value + (buildId to synchronized(collected) { collected.toList() })
                     _active.value[request.projectId]?.let { current ->
                         _active.value = _active.value + (request.projectId to current.copy(status = BuildStatus.RUNNING))
@@ -487,7 +539,7 @@ class BuildEngine(
                 BackendOutcome(
                     status = BuildStatus.FAILED,
                     exitCode = null,
-                    logLines = collected + "Build crashed: ${e.message}",
+                    logLines = synchronized(collected) { collected.toList() } + "Build crashed: ${e.message}",
                     artifacts = emptyList(),
                     stages = emptyList(),
                     failureReason = "Build crashed: ${e.message}",
@@ -511,6 +563,7 @@ class BuildEngine(
                 testSummary = parsed.testSummary,
                 failureReason = outcome.failureReason ?: parsed.failureReason,
                 executorLabel = outcome.executorLabel,
+                projectKind = outcome.projectKind,
             )
 
             _active.value = _active.value - request.projectId
@@ -524,9 +577,10 @@ class BuildEngine(
     }
 
     fun stop(projectId: String) {
-        jobs[projectId]?.cancel()
-        jobs.remove(projectId)
-        runner.cancelAll()
+        jobs.remove(projectId)?.cancel()
+        // Cancel only this project's processes. Cancelling every session would kill an
+        // unrelated project's build, which is exactly what a scoped Stop must not do.
+        sessionsByProject.remove(projectId)?.forEach { sessionId -> runner.cancel(sessionId) }
         _active.value[projectId]?.let { current ->
             _active.value = _active.value - projectId
             _lastResult.value = current.copy(

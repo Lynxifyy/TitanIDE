@@ -72,9 +72,17 @@ data class AgentSubmitResponse(@SerialName("job_id") val jobId: String)
  * response; a network failure surfaces as a failed build, never as a success.
  */
 class RemoteAgentBackend(
-    private val baseUrl: String,
-    private val token: String?,
+    /** Read per execution so a Settings change applies to the next build, not the next launch. */
+    private val baseUrlProvider: () -> String,
+    private val tokenProvider: suspend () -> String?,
     private val client: OkHttpClient = defaultClient(),
+    /**
+     * Where downloaded artifacts are written. Artifacts must land on disk: a URL alone is
+     * not a usable build result, because installing or sharing an APK needs the bytes.
+     */
+    private val artifactDir: (projectId: String) -> File = { projectId ->
+        File(System.getProperty("java.io.tmpdir") ?: "/tmp", "titan-artifacts/$projectId")
+    },
 ) : BuildBackend {
 
     override val target = ExecutionTarget.REMOTE_AGENT
@@ -83,6 +91,8 @@ class RemoteAgentBackend(
 
     override suspend fun execute(request: BuildRequest, onLog: (String) -> Unit): BackendOutcome =
         withContext(Dispatchers.IO) {
+            val baseUrl = baseUrlProvider().trim().trimEnd('/')
+            val token = tokenProvider()
             if (baseUrl.isBlank()) {
                 return@withContext failure("No remote agent URL is configured")
             }
@@ -113,7 +123,7 @@ class RemoteAgentBackend(
                 sourceArchive = java.util.Base64.getEncoder().encodeToString(archive),
             )
 
-            val submit = postJson("$baseUrl/v1/jobs", json.encodeToString(AgentJobRequest.serializer(), payload))
+            val submit = postJson("$baseUrl/v1/jobs", json.encodeToString(AgentJobRequest.serializer(), payload), token)
                 ?: return@withContext failure("Could not reach the build agent at $baseUrl")
 
             val jobId = runCatching {
@@ -131,7 +141,7 @@ class RemoteAgentBackend(
             while (polls < MAX_POLLS) {
                 polls++
                 delay(POLL_INTERVAL_MS)
-                val body = getJson("$baseUrl/v1/jobs/$jobId")
+                val body = getJson("$baseUrl/v1/jobs/$jobId", token)
                     ?: return@withContext failure("Lost contact with the build agent while polling job $jobId")
 
                 val status = runCatching {
@@ -148,13 +158,18 @@ class RemoteAgentBackend(
                 when (status.state.lowercase()) {
                     "succeeded" -> {
                         stages += BuildStage("remote", stageStart, System.currentTimeMillis(), true)
+                        val artifacts = downloadArtifacts(
+                            remote = status.artifacts,
+                            baseUrl = baseUrl,
+                            token = token,
+                            projectId = request.projectId,
+                            onLog = onLog,
+                        )
                         return@withContext BackendOutcome(
                             status = BuildStatus.SUCCEEDED,
                             exitCode = status.exitCode ?: 0,
                             logLines = status.log.split('\n').filter { it.isNotEmpty() },
-                            artifacts = status.artifacts.map {
-                                Artifact(name = it.name, path = it.url ?: it.name, sizeBytes = it.sizeBytes)
-                            },
+                            artifacts = artifacts,
                             stages = stages,
                             failureReason = null,
                             executorLabel = "Remote agent (${baseUrl.hostOf()})",
@@ -189,7 +204,7 @@ class RemoteAgentBackend(
             failure("Remote build did not finish within ${MAX_POLLS * POLL_INTERVAL_MS / 1000}s")
         }
 
-    private fun postJson(url: String, body: String): String? = runCatching {
+    private fun postJson(url: String, body: String, token: String?): String? = runCatching {
         val request = Request.Builder()
             .url(url)
             .post(body.toRequestBody("application/json".toMediaType()))
@@ -200,7 +215,7 @@ class RemoteAgentBackend(
         }
     }.getOrNull()
 
-    private fun getJson(url: String): String? = runCatching {
+    private fun getJson(url: String, token: String?): String? = runCatching {
         val request = Request.Builder()
             .url(url)
             .get()
@@ -210,6 +225,100 @@ class RemoteAgentBackend(
             if (!response.isSuccessful) null else response.body?.string()
         }
     }.getOrNull()
+
+    /**
+     * Downloads every artifact the agent produced and returns local file references.
+     *
+     * The agent reports a relative `url` such as `/v1/jobs/<id>/artifacts/app-debug.apk`.
+     * That path is resolved against the agent base URL, the bytes are streamed to disk
+     * rather than buffered in memory (an APK can be hundreds of megabytes), and the size
+     * the agent declared is verified. An artifact that cannot be fetched is dropped from
+     * the result and logged, so the UI never offers a file that is not on disk.
+     */
+    private suspend fun downloadArtifacts(
+        remote: List<AgentArtifact>,
+        baseUrl: String,
+        token: String?,
+        projectId: String,
+        onLog: (String) -> Unit,
+    ): List<Artifact> = withContext(Dispatchers.IO) {
+        if (remote.isEmpty()) return@withContext emptyList()
+        val destination = artifactDir(projectId)
+        if (!destination.isDirectory && !destination.mkdirs()) {
+            onLog("Could not create the artifact directory ${destination.absolutePath}")
+            return@withContext emptyList()
+        }
+
+        val collected = ArrayList<Artifact>()
+        for (item in remote) {
+            val reference = item.url?.takeIf { it.isNotBlank() }
+            if (reference == null) {
+                onLog("Artifact ${item.name} has no download URL")
+                continue
+            }
+            val absolute = resolveArtifactUrl(baseUrl, reference)
+            val safeName = item.name.substringAfterLast('/').ifBlank { "artifact" }
+            val target = File(destination, safeName)
+
+            val ok = runCatching {
+                val request = Request.Builder()
+                    .url(absolute)
+                    .apply { token?.let { header("Authorization", "Bearer $it") } }
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        onLog("Artifact ${item.name} download failed with HTTP ${response.code}")
+                        return@use false
+                    }
+                    val body = response.body ?: return@use false
+                    // Stream to disk: buffering an APK in a byte array risks an OOM on a phone.
+                    target.outputStream().use { sink -> body.byteStream().copyTo(sink) }
+                    true
+                }
+            }.getOrElse { error ->
+                onLog("Artifact ${item.name} download failed: ${error.message}")
+                false
+            }
+
+            if (!ok) {
+                runCatching { target.delete() }
+                continue
+            }
+
+            val size = target.length()
+            if (item.sizeBytes > 0 && size != item.sizeBytes) {
+                onLog(
+                    "Artifact ${item.name} was ${size}B but the agent reported ${item.sizeBytes}B; " +
+                        "discarding the incomplete download",
+                )
+                runCatching { target.delete() }
+                continue
+            }
+
+            onLog("Downloaded ${item.name} (${size / 1024} KB)")
+            collected += Artifact(
+                name = safeName,
+                path = target.absolutePath,
+                sizeBytes = size,
+                mimeType = mimeFor(safeName),
+            )
+        }
+        collected
+    }
+
+    /** Resolves an agent-relative artifact path against the agent base URL. */
+    private fun resolveArtifactUrl(baseUrl: String, reference: String): String = when {
+        reference.startsWith("http://") || reference.startsWith("https://") -> reference
+        reference.startsWith("/") -> baseUrl + reference
+        else -> "$baseUrl/$reference"
+    }
+
+    private fun mimeFor(name: String): String? = when (name.substringAfterLast('.', "")) {
+        "apk" -> "application/vnd.android.package-archive"
+        "aar", "jar" -> "application/java-archive"
+        "zip" -> "application/zip"
+        else -> null
+    }
 
     private fun failure(reason: String) = BackendOutcome(
         status = BuildStatus.FAILED,

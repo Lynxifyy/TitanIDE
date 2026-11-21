@@ -12,6 +12,7 @@ import dev.titanide.core.ai.context.ContextBuilder
 import dev.titanide.core.ai.providers.AnthropicProvider
 import dev.titanide.core.ai.providers.OpenAiCompatibleProvider
 import dev.titanide.core.data.db.TitanDatabase
+import dev.titanide.core.data.db.TitanMigrations
 import dev.titanide.core.data.files.SafeFileSystem
 import dev.titanide.core.data.repo.BuildHistoryRepository
 import dev.titanide.core.data.repo.FileTreeRepository
@@ -24,6 +25,7 @@ import dev.titanide.core.git.auth.resolveGitHubAuth
 import dev.titanide.core.data.security.SecureCredentialStore
 import dev.titanide.core.data.settings.SettingsRepository
 import dev.titanide.core.data.settings.TitanSettings
+import dev.titanide.core.engine.ApkInstaller
 import dev.titanide.core.engine.BuildEngine
 import dev.titanide.core.engine.LocalBuildBackend
 import dev.titanide.core.engine.ProcessRunner
@@ -70,11 +72,16 @@ class TitanContainer(private val context: Context) {
 
     val database: TitanDatabase by lazy {
         Room.databaseBuilder(context, TitanDatabase::class.java, "titan.db")
-            .fallbackToDestructiveMigration(dropAllTables = true)
+            // No destructive fallback: projects, build history and open tabs are user data,
+            // so an unhandled schema change must fail loudly instead of wiping the database.
+            .addMigrations(*TitanMigrations.ALL)
             .build()
     }
 
     val storage: ProjectStorage by lazy { ProjectStorage(context) }
+
+    /** Installs built APKs through the system package installer. */
+    val apkInstaller: ApkInstaller by lazy { ApkInstaller(context) }
     val safeFileSystem: SafeFileSystem by lazy { SafeFileSystem() }
     val settings: SettingsRepository by lazy { SettingsRepository(context) }
     val credentials: SecureCredentialStore by lazy { SecureCredentialStore(context) }
@@ -113,29 +120,45 @@ class TitanContainer(private val context: Context) {
      */
     val gitHubAuth: StateFlow<GitHubAuthState> = _gitHubAuth.asStateFlow()
     private val branchRegistry = HashMap<String, String>()
-    private var remoteAgentToken: String? = null
 
+    /** Set once the lazy engine exists; the local backend reports sessions through it. */
+    @Volatile
+    private var buildEngineRef: BuildEngine? = null
+
+    /**
+     * The build engine is created once, but every backend reads its configuration through
+     * a provider at execution time. Capturing settings here instead would freeze the
+     * remote URL, token, owner and workflow at first use, so editing Settings would only
+     * take effect after an app restart.
+     */
     val buildEngine: BuildEngine by lazy {
-        val buildSettings = settingsState.value?.build
         BuildEngine(
             scope = appScope,
-            localBackend = LocalBuildBackend(processRunner, safeFileSystem),
+            localBackend = LocalBuildBackend(
+                runner = processRunner,
+                onSessionStarted = { projectId, sessionId ->
+                    buildEngineRef?.registerSession(projectId, sessionId)
+                },
+            ),
             remoteBackends = mapOf(
                 ExecutionTarget.REMOTE_AGENT to RemoteAgentBackend(
-                    baseUrl = buildSettings?.remoteAgentUrl.orEmpty(),
-                    token = remoteAgentToken,
+                    baseUrlProvider = { settingsState.value?.build?.remoteAgentUrl.orEmpty() },
+                    tokenProvider = { credentials.get(CredentialKey.REMOTE_AGENT_TOKEN) },
                 ),
                 ExecutionTarget.GITHUB_ACTIONS to GitHubActionsBackend(
-                    owner = buildSettings?.githubOwner.orEmpty(),
-                    repo = buildSettings?.githubRepo.orEmpty(),
-                    workflowFile = buildSettings?.githubWorkflow ?: "titan-build.yml",
+                    ownerProvider = { settingsState.value?.build?.githubOwner.orEmpty() },
+                    repoProvider = { settingsState.value?.build?.githubRepo.orEmpty() },
+                    workflowProvider = {
+                        settingsState.value?.build?.githubWorkflow?.takeIf { it.isNotBlank() }
+                            ?: "titan-build.yml"
+                    },
                     tokenProvider = { gitHubToken.value },
                     branchProvider = { projectId -> branchRegistry[projectId] },
                 ),
             ),
             history = buildHistory,
             runner = processRunner,
-        )
+        ).also { buildEngineRef = it }
     }
 
     /**
@@ -184,7 +207,7 @@ class TitanContainer(private val context: Context) {
         appScope.launch {
             // Sequential on purpose: EncryptedSharedPreferences is not safe to read from
             // two coroutines at once, and concurrent reads corrupted state under load.
-            remoteAgentToken = credentials.get(CredentialKey.REMOTE_AGENT_TOKEN)
+            // The remote agent token is not read here: the backend resolves it per build.
             restoreGitHubAuth()
             buildHistory.prune(settings.settings.first().build.keepLogsDays)
         }
@@ -220,7 +243,6 @@ class TitanContainer(private val context: Context) {
 
     suspend fun refreshCredentials() {
         restoreGitHubAuth()
-        remoteAgentToken = credentials.get(CredentialKey.REMOTE_AGENT_TOKEN)
         refreshAiProvider()
     }
 

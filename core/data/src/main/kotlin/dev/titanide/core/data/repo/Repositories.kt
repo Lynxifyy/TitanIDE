@@ -9,7 +9,9 @@ import dev.titanide.core.data.db.ProjectEntity
 import dev.titanide.core.data.db.TabDao
 import dev.titanide.core.data.files.FileNode
 import dev.titanide.core.data.files.SafeFileSystem
+import dev.titanide.core.model.Artifact
 import dev.titanide.core.model.BuildResult
+import dev.titanide.core.model.Diagnostic
 import dev.titanide.core.model.BuildStatus
 import dev.titanide.core.model.BuildSystem
 import dev.titanide.core.model.Language
@@ -131,6 +133,10 @@ class FileTreeRepository(private val fs: SafeFileSystem = SafeFileSystem()) {
 class BuildHistoryRepository(
     private val buildDao: BuildDao,
     private val storage: ProjectStorage,
+    private val json: kotlinx.serialization.json.Json = kotlinx.serialization.json.Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+    },
 ) {
     fun observeRecent(limit: Int = 50): Flow<List<BuildRecordEntity>> = buildDao.observeRecent(limit)
 
@@ -168,9 +174,44 @@ class BuildHistoryRepository(
                 testsFailed = result.testSummary?.failed ?: 0,
                 logPath = if (logFile.exists()) logFile.absolutePath else null,
                 failureReason = result.failureReason,
+                artifactsJson = json.encodeToString(
+                    kotlinx.serialization.builtins.ListSerializer(Artifact.serializer()),
+                    result.artifacts,
+                ),
+                diagnosticsJson = json.encodeToString(
+                    kotlinx.serialization.builtins.ListSerializer(Diagnostic.serializer()),
+                    result.diagnostics,
+                ),
+                projectKind = result.projectKind,
             ),
         )
     }
+
+    /**
+     * Rebuilds the artifacts and diagnostics stored with a finished build, so history can
+     * offer an installable APK and the error list without re-running the build. Malformed
+     * JSON yields an empty list rather than an exception: a corrupt history row must not
+     * break the History screen.
+     */
+    fun artifactsOf(record: BuildRecordEntity): List<Artifact> =
+        record.artifactsJson?.let { raw ->
+            runCatching {
+                json.decodeFromString(
+                    kotlinx.serialization.builtins.ListSerializer(Artifact.serializer()),
+                    raw,
+                )
+            }.getOrDefault(emptyList())
+        }.orEmpty().filter { File(it.path).exists() }
+
+    fun diagnosticsOf(record: BuildRecordEntity): List<Diagnostic> =
+        record.diagnosticsJson?.let { raw ->
+            runCatching {
+                json.decodeFromString(
+                    kotlinx.serialization.builtins.ListSerializer(Diagnostic.serializer()),
+                    raw,
+                )
+            }.getOrDefault(emptyList())
+        }.orEmpty()
 
     suspend fun readLog(buildId: String): List<String> = withContext(Dispatchers.IO) {
         val file = storage.logFile(buildId)

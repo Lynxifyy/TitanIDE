@@ -52,6 +52,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.titanide.core.designsystem.TitanColors
 import dev.titanide.core.model.BuildKind
+import dev.titanide.core.model.BuildResult
+import dev.titanide.core.model.BuildStatus
 import dev.titanide.core.model.Severity
 import dev.titanide.core.workbench.Activity
 import dev.titanide.core.workbench.BottomTool
@@ -84,6 +86,8 @@ fun WorkbenchScreen(
     val build by viewModel.build.collectAsStateWithLifecycle()
     val logs by viewModel.buildLogs.collectAsStateWithLifecycle()
     val agent by viewModel.agent.collectAsStateWithLifecycle()
+    val installInProgress by viewModel.installInProgress.collectAsStateWithLifecycle()
+    val installedPackage by viewModel.lastInstalledPackage.collectAsStateWithLifecycle()
 
     val configuration = LocalConfiguration.current
     val density = LocalDensity.current
@@ -151,6 +155,18 @@ fun WorkbenchScreen(
                         onDelete = { node -> viewModel.deleteFile(node.path) },
                         onToggleAndroidView = viewModel::toggleAndroidView,
                         onOpenProject = onOpenProjects,
+                        build = build,
+                        buildRunning = build.isRunningBuild(),
+                        onBuild = { viewModel.runBuild(BuildKind.BUILD) },
+                        onTest = { viewModel.runBuild(BuildKind.TEST) },
+                        onClean = { viewModel.runBuild(BuildKind.CLEAN) },
+                        onRebuild = { viewModel.runBuild(BuildKind.REBUILD) },
+                        onRun = { viewModel.runBuild(BuildKind.RUN) },
+                        onStop = viewModel::stopBuild,
+                        installInProgress = installInProgress,
+                        installedPackage = installedPackage,
+                        onInstall = viewModel::installLastBuildApk,
+                        onLaunch = viewModel::launchInstalledApp,
                         modifier = Modifier
                             .width(state.sidebarWidthDp.dp)
                             .fillMaxHeight(),
@@ -283,6 +299,18 @@ fun WorkbenchScreen(
                     onDelete = { node -> viewModel.deleteFile(node.path) },
                     onToggleAndroidView = viewModel::toggleAndroidView,
                     onOpenProject = onOpenProjects,
+                    build = build,
+                    buildRunning = build.isRunningBuild(),
+                    onBuild = { viewModel.runBuild(BuildKind.BUILD) },
+                    onTest = { viewModel.runBuild(BuildKind.TEST) },
+                    onClean = { viewModel.runBuild(BuildKind.CLEAN) },
+                    onRebuild = { viewModel.runBuild(BuildKind.REBUILD) },
+                    onRun = { viewModel.runBuild(BuildKind.RUN) },
+                    onStop = viewModel::stopBuild,
+                    installInProgress = installInProgress,
+                    installedPackage = installedPackage,
+                    onInstall = viewModel::installLastBuildApk,
+                    onLaunch = viewModel::launchInstalledApp,
                     modifier = Modifier
                         .width(state.policy.sidebarWidthDp.dp)
                         .fillMaxHeight()
@@ -395,6 +423,18 @@ private fun SidebarHost(
     onDelete: (dev.titanide.core.workbench.ProjectNode) -> Unit,
     onToggleAndroidView: () -> Unit,
     onOpenProject: () -> Unit,
+    build: BuildResult?,
+    buildRunning: Boolean,
+    onBuild: () -> Unit,
+    onTest: () -> Unit,
+    onClean: () -> Unit,
+    onRebuild: () -> Unit,
+    onRun: () -> Unit,
+    onStop: () -> Unit,
+    installInProgress: Boolean,
+    installedPackage: String?,
+    onInstall: () -> Unit,
+    onLaunch: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var query by remember { mutableStateOf("") }
@@ -457,7 +497,29 @@ private fun SidebarHost(
             )
 
             Activity.RUN_DEBUG -> RunSidebar(
-                onBuild = { },
+                projectName = state.projectName,
+                buildRunning = buildRunning,
+                lastBuildStatus = build?.status?.name,
+                lastBuildExecutor = build?.executorLabel,
+                canRun = build?.status == BuildStatus.SUCCEEDED,
+                runHint = when {
+                    buildRunning -> "A build is running. Stop it before starting another."
+                    build == null -> "No build yet. Build the project to see real output here."
+                    build.status == BuildStatus.SUCCEEDED ->
+                        "Last build succeeded. Run installs the built app on a connected device."
+                    else -> build.failureReason ?: "The last build did not succeed."
+                },
+                onBuild = onBuild,
+                onTest = onTest,
+                onClean = onClean,
+                onRebuild = onRebuild,
+                hasApk = build?.artifacts?.any { it.name.endsWith(".apk", ignoreCase = true) } == true,
+                installInProgress = installInProgress,
+                installedPackage = installedPackage,
+                onInstall = onInstall,
+                onLaunch = onLaunch,
+                onRun = onRun,
+                onStop = onStop,
                 onOpenProject = onOpenProject,
             )
 

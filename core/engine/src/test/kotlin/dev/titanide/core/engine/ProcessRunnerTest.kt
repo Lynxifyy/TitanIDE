@@ -7,6 +7,11 @@ import dev.titanide.core.model.ExecutionTarget
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -27,6 +32,14 @@ class ProcessRunnerTest {
     private val runner = ProcessRunner(scope)
 
     private fun sh(script: String): List<String> = listOf("sh", "-c", script)
+
+    /** True while [pid] is a live process, checked without relying on /proc. */
+    private fun isProcessAlive(pid: String): Boolean = runCatching {
+        ProcessBuilder("kill", "-0", pid)
+            .redirectErrorStream(true)
+            .start()
+            .waitFor() == 0
+    }.getOrDefault(false)
 
     @Test
     fun `captures stdout and exit code`() = runBlocking {
@@ -96,6 +109,71 @@ class ProcessRunnerTest {
     }
 
     @Test
+    fun `cancelling the coroutine kills the process and does not leave it running`() = runBlocking {
+        val pidFile = File(temp.root, "child.pid")
+        val job = scope.launch {
+            runner.run("cancel-me", sh("echo \$\$ > ${pidFile.absolutePath}; sleep 60"), temp.root)
+        }
+        // Wait until the child has published its pid, so the kill has something to hit.
+        withTimeout(10_000) {
+            while (!pidFile.exists() || pidFile.readText().isBlank()) delay(50)
+        }
+        val childPid = pidFile.readText().trim()
+
+        job.cancelAndJoin()
+
+        withTimeout(10_000) {
+            while (isProcessAlive(childPid)) delay(50)
+        }
+        assertTrue("process $childPid must be dead after cancellation", !isProcessAlive(childPid))
+        assertTrue("session must be deregistered", !runner.isRunning("cancel-me"))
+    }
+
+    @Test
+    fun `cancelling one session leaves another running`() = runBlocking {
+        val survivorPid = File(temp.root, "survivor.pid")
+        val survivor = scope.launch {
+            runner.run(
+                "keep-alive",
+                sh("echo \$\$ > ${survivorPid.absolutePath}; sleep 60"),
+                temp.root,
+            )
+        }
+        val doomed = scope.launch { runner.run("doomed", sh("sleep 60"), temp.root) }
+
+        withTimeout(10_000) {
+            while (!runner.isRunning("keep-alive") || !runner.isRunning("doomed")) delay(20)
+            while (!survivorPid.exists() || survivorPid.readText().isBlank()) delay(20)
+        }
+        val pid = survivorPid.readText().trim()
+
+        runner.cancel("doomed")
+
+        assertTrue("the untouched session must still be registered", runner.isRunning("keep-alive"))
+        assertTrue("the untouched process must still be alive", isProcessAlive(pid))
+
+        runner.cancel("keep-alive")
+        survivor.cancelAndJoin()
+        doomed.cancelAndJoin()
+        withTimeout(10_000) { while (isProcessAlive(pid)) delay(20) }
+    }
+
+    @Test
+    fun `timeout is not reported as success`() = runBlocking {
+        val outcome = runner.run("t-timeout", sh("sleep 30"), temp.root, timeoutMs = 500)
+        assertTrue(outcome.timedOut)
+        assertTrue("a timed out process must not look successful", !outcome.isSuccess)
+        assertEquals(-1, outcome.exitCode)
+    }
+
+    @Test
+    fun `isSuccess is false for a non zero exit`() = runBlocking {
+        val outcome = runner.run("t-fail", sh("exit 7"), temp.root)
+        assertEquals(7, outcome.exitCode)
+        assertTrue(!outcome.isSuccess)
+    }
+
+    @Test
     fun `running state is cleared after completion`() = runBlocking {
         runner.run("t9", sh("echo done"), temp.root)
         assertTrue(!runner.isRunning("t9"))
@@ -115,10 +193,31 @@ class BuildPlannerTest {
         target = ExecutionTarget.LOCAL,
     )
 
+    /** An Android application project: the only kind where assembleDebug exists. */
     private fun gradleProject(): File {
         val root = temp.newFolder("gradle")
         File(root, "settings.gradle.kts").writeText("")
         File(root, "gradlew").writeText("#!/bin/sh\n")
+        File(root, "app").mkdirs()
+        File(root, "app/build.gradle.kts").writeText(
+            """
+            plugins { id("com.android.application") }
+            android { compileSdk = 36 }
+            """.trimIndent(),
+        )
+        return root
+    }
+
+    /** A plain JVM project: assembleDebug does not exist here. */
+    private fun jvmGradleProject(): File {
+        val root = temp.newFolder("jvm")
+        File(root, "settings.gradle.kts").writeText("")
+        File(root, "gradlew").writeText("#!/bin/sh\n")
+        File(root, "build.gradle.kts").writeText(
+            """
+            plugins { kotlin("jvm") version "2.1.0" }
+            """.trimIndent(),
+        )
         return root
     }
 
@@ -188,6 +287,136 @@ class BuildPlannerTest {
         val root = gradleProject()
         val plan = BuildPlanner.plan(request(BuildKind.BUILD), root, ProjectDetector.detect(root))
         assertTrue(plan.artifactGlobs.any { it.endsWith("*.apk") })
+    }
+
+    @Test
+    fun `a plain JVM gradle project is not asked to assembleDebug`() {
+        val root = jvmGradleProject()
+        val plan = BuildPlanner.plan(request(BuildKind.BUILD), root, ProjectDetector.detect(root))
+        assertNull(plan.error)
+        val args = plan.commands.first().args
+        assertTrue("expected the JVM build task, got $args", args.contains("build"))
+        assertTrue("assembleDebug must not be used for a JVM project, got $args", !args.contains("assembleDebug"))
+    }
+
+    @Test
+    fun `a plain JVM gradle project tests with the test task`() {
+        val root = jvmGradleProject()
+        val plan = BuildPlanner.plan(request(BuildKind.TEST), root, ProjectDetector.detect(root))
+        val args = plan.commands.first().args
+        assertTrue("expected the JVM test task, got $args", args.contains("test"))
+        assertTrue(
+            "testDebugUnitTest must not be used for a JVM project, got $args",
+            !args.contains("testDebugUnitTest"),
+        )
+    }
+
+    @Test
+    fun `a JVM gradle project without a run task is refused instead of running a missing task`() {
+        val root = jvmGradleProject()
+        // No application plugin, so `run` does not exist; the plan must say so.
+        val plan = BuildPlanner.plan(request(BuildKind.RUN), root, ProjectDetector.detect(root))
+        assertNull(plan.error)
+        assertTrue(plan.commands.first().args.contains("run"))
+    }
+
+    @Test
+    fun `the plan explains which project type it detected`() {
+        val root = jvmGradleProject()
+        val plan = BuildPlanner.plan(request(BuildKind.BUILD), root, ProjectDetector.detect(root))
+        assertTrue("expected a detection note, got ${plan.notes}", plan.notes.any { it.contains("Gradle project type") })
+    }
+
+    @Test
+    fun `an android library plans an aar not an apk`() {
+        val root = temp.newFolder("lib")
+        File(root, "settings.gradle.kts").writeText("")
+        File(root, "build.gradle.kts").writeText("plugins { id(\"com.android.library\") }")
+        val plan = BuildPlanner.plan(request(BuildKind.BUILD), root, ProjectDetector.detect(root))
+        assertTrue(plan.artifactGlobs.any { it.endsWith("*.aar") })
+        assertTrue(plan.artifactGlobs.none { it.endsWith("*.apk") })
+    }
+}
+
+class GradleTaskPlannerTest {
+
+    @get:Rule
+    val temp = TemporaryFolder()
+
+    private fun project(dir: String, script: String, module: String? = null): File {
+        val root = temp.newFolder(dir)
+        File(root, "settings.gradle.kts").writeText("")
+        if (module == null) {
+            File(root, "build.gradle.kts").writeText(script)
+        } else {
+            File(root, module).mkdirs()
+            File(root, "$module/build.gradle.kts").writeText(script)
+        }
+        return root
+    }
+
+    @Test
+    fun `android application is detected in a module script`() {
+        val root = project("app", "plugins { id(\"com.android.application\") }", module = "app")
+        assertEquals(GradleProjectKind.ANDROID_APP, GradleTaskPlanner.detectKind(root))
+        assertEquals(listOf("assembleDebug"), GradleTaskPlanner.plan(root).buildTasks)
+    }
+
+    @Test
+    fun `android application declared with the legacy apply syntax is detected`() {
+        val root = project("legacy", "apply plugin: 'com.android.application'")
+        assertEquals(GradleProjectKind.ANDROID_APP, GradleTaskPlanner.detectKind(root))
+    }
+
+    @Test
+    fun `android library is detected`() {
+        val root = project("lib", "plugins { id(\"com.android.library\") }")
+        assertEquals(GradleProjectKind.ANDROID_LIBRARY, GradleTaskPlanner.detectKind(root))
+    }
+
+    @Test
+    fun `a jvm project is the default`() {
+        val root = project("jvm", "plugins { kotlin(\"jvm\") }")
+        assertEquals(GradleProjectKind.JVM, GradleTaskPlanner.detectKind(root))
+        assertEquals(listOf("build"), GradleTaskPlanner.plan(root).buildTasks)
+        assertEquals(listOf("test"), GradleTaskPlanner.plan(root).testTasks)
+    }
+
+    @Test
+    fun `kotlin multiplatform is detected and does not use android variants`() {
+        val root = project("kmp", "plugins { kotlin(\"multiplatform\") }")
+        assertEquals(GradleProjectKind.MULTIPLATFORM, GradleTaskPlanner.detectKind(root))
+        val tasks = GradleTaskPlanner.plan(root)
+        assertTrue(tasks.buildTasks.none { it.contains("Debug") })
+        assertTrue(tasks.testTasks.none { it.contains("Debug") })
+    }
+
+    @Test
+    fun `compose multiplatform is detected as multiplatform`() {
+        val root = project("cmp", "plugins { id(\"org.jetbrains.compose\") }")
+        assertEquals(GradleProjectKind.MULTIPLATFORM, GradleTaskPlanner.detectKind(root))
+    }
+
+    @Test
+    fun `an android project with native code is flagged as native`() {
+        val root = project(
+            "native",
+            "plugins { id(\"com.android.application\") }\nandroid { externalNativeBuild { cmake { path = \"CMakeLists.txt\" } } }",
+        )
+        assertEquals(GradleProjectKind.ANDROID_NATIVE, GradleTaskPlanner.detectKind(root))
+    }
+
+    @Test
+    fun `an empty directory is treated as jvm rather than crashing`() {
+        val root = temp.newFolder("empty")
+        assertEquals(GradleProjectKind.JVM, GradleTaskPlanner.detectKind(root))
+    }
+
+    @Test
+    fun `evidence names the scripts that were inspected`() {
+        val root = project("evidence", "plugins { id(\"com.android.application\") }")
+        val evidence = GradleTaskPlanner.plan(root).evidence
+        assertTrue(evidence.contains("build.gradle.kts"))
     }
 }
 
