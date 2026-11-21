@@ -8,7 +8,13 @@ import dev.titanide.core.ai.agent.AgentTool
 import dev.titanide.core.ai.agent.ToolResult
 import dev.titanide.core.ai.providers.AnthropicProvider
 import dev.titanide.core.ai.providers.OpenAiCompatibleProvider
+import dev.titanide.core.ai.context.ContextBuilder
 import dev.titanide.core.ai.providers.UnconfiguredProvider
+import dev.titanide.core.data.repo.FileTreeRepository
+import dev.titanide.core.model.BuildSystem
+import dev.titanide.core.model.Language
+import dev.titanide.core.model.Project
+import dev.titanide.core.model.ProjectCategory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -526,5 +532,61 @@ class AgentApprovalGateTest {
         listOf("write_file", "delete_file").forEach {
             assertTrue("$it changes the project", ToolPolicy.requiresApproval(it))
         }
+    }
+}
+
+/**
+ * `run` guards the busy flag with `finally` but had no `catch`, so a provider that threw
+ * instead of returning a [ChatResult.Failure] took the coroutine down with it: the caller in
+ * the AI screen never received an outcome and its composer stayed disabled for good. A
+ * transport problem must always come back as an [AiOutcome.Failure] the user can read.
+ */
+class TitanIntelligenceFailureTest {
+
+    private class ThrowingProvider(private val error: Throwable) : AiProvider {
+        override val id = "throwing"
+        override val displayName = "Throwing"
+        override val requiresApiKey = false
+        override val supportsStreaming = false
+        override val models = listOf("throwing")
+        override suspend fun chat(request: ChatRequest): ChatResult = throw error
+    }
+
+    private fun intelligence(provider: AiProvider): Pair<TitanIntelligence, Project> {
+        val root = kotlin.io.path.createTempDirectory("ai-failure").toFile()
+        val project = Project(
+            id = "p1",
+            name = "Failure",
+            packageName = "dev.titanide.failure",
+            rootPath = root.absolutePath,
+            category = ProjectCategory.BLANK,
+            templateId = "blank",
+            languages = listOf(Language.KOTLIN),
+            buildSystem = BuildSystem.NONE,
+            createdAt = 0L,
+            lastOpenedAt = 0L,
+        )
+        val files = FileTreeRepository()
+        return TitanIntelligence(
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            providerProvider = { provider },
+            model = "throwing",
+            contextBuilder = ContextBuilder(files),
+            files = files,
+            editApplier = EditApplier(files),
+        ) to project
+    }
+
+    @Test
+    fun `a provider that throws is reported instead of escaping`() = runBlocking {
+        val (intelligence, project) = intelligence(ThrowingProvider(IllegalStateException("socket closed")))
+        val outcome = intelligence.chat(project, listOf(ChatMessage(ChatMessage.Role.USER, "hi")), includeContext = false)
+
+        assertTrue("expected a Failure, got $outcome", outcome is AiOutcome.Failure)
+        assertTrue(
+            "the reason must carry the real error: $outcome",
+            (outcome as AiOutcome.Failure).reason.contains("socket closed"),
+        )
+        assertFalse("the busy flag must be released", intelligence.busy.value)
     }
 }

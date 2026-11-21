@@ -206,6 +206,13 @@ class TitanIntelligence(
             }
             _lastOutcome.value = outcome
             outcome
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // A provider may throw instead of returning a Failure. Letting it escape left the
+            // caller with no outcome at all and its busy flag stuck, so the UI showed nothing
+            // and stayed disabled. Report it as an ordinary failure instead.
+            AiOutcome.Failure(e.message ?: e::class.java.simpleName).also { _lastOutcome.value = it }
         } finally {
             _busy.value = false
         }
