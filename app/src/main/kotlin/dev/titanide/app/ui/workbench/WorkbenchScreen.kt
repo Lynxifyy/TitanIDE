@@ -83,6 +83,7 @@ fun WorkbenchScreen(
     val expanded by viewModel.expanded.collectAsStateWithLifecycle()
     val searchHits by viewModel.searchHits.collectAsStateWithLifecycle()
     val find by viewModel.find.collectAsStateWithLifecycle()
+    val appearance by viewModel.appearance.collectAsStateWithLifecycle()
     val revealToken by viewModel.revealRequests.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val build by viewModel.build.collectAsStateWithLifecycle()
@@ -204,6 +205,7 @@ fun WorkbenchScreen(
                                 modifier = Modifier.weight(1f).fillMaxHeight(),
                                 showGutter = active || state.groups.size == 1,
                                 find = find,
+                                appearance = appearance,
                                 revealToken = revealToken,
                                 onFindQueryChange = viewModel::setFindQuery,
                                 onFindReplaceChange = viewModel::setFindReplacement,

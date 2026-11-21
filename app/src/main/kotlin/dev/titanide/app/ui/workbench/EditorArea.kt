@@ -77,6 +77,7 @@ fun EditorArea(
     modifier: Modifier = Modifier,
     showGutter: Boolean = true,
     find: FindState = FindState(),
+    appearance: EditorAppearance = EditorAppearance(),
     revealToken: Long = 0L,
     onFindQueryChange: (String) -> Unit = {},
     onFindReplaceChange: (String) -> Unit = {},
@@ -102,8 +103,9 @@ fun EditorArea(
                 diagnostics = diagnostics,
                 onChange = onChange,
                 modifier = Modifier.weight(1f),
-                showGutter = showGutter,
+                showGutter = showGutter && appearance.showLineNumbers,
                 activeMatch = find.current,
+                appearance = appearance,
                 revealToken = revealToken,
             )
             if (find.open) {
@@ -236,10 +238,11 @@ private fun CodeSurface(
     modifier: Modifier = Modifier,
     showGutter: Boolean = true,
     activeMatch: IntRange? = null,
+    appearance: EditorAppearance = EditorAppearance(),
     revealToken: Long = 0L,
 ) {
-    val fontSize = 12
-    val lineHeight = 18
+    val fontSize = appearance.fontSizeSp
+    val lineHeight = appearance.lineHeightSp
     val annotated = remember(buffer.content, buffer.language) {
         SyntaxHighlighting.highlight(buffer.content, buffer.language)
     }
@@ -349,8 +352,8 @@ private fun CodeSurface(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
+                .then(if (appearance.wordWrap) Modifier else Modifier.horizontalScroll(horizontal))
                 .verticalScroll(vertical)
-                .horizontalScroll(horizontal)
                 .padding(start = 8.dp, top = 6.dp, end = 8.dp, bottom = 8.dp),
         )
     }

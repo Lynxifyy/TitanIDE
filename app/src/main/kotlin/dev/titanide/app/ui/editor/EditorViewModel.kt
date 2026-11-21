@@ -3,18 +3,20 @@ package dev.titanide.app.ui.editor
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.titanide.app.di.TitanContainer
+import dev.titanide.app.ui.workbench.EditorAppearance
 import dev.titanide.core.data.files.SafeFileSystem
-import dev.titanide.core.editor.codeguard.CodeGuard
 import dev.titanide.core.editor.EditorEngine
 import dev.titanide.core.editor.SearchEngine
 import dev.titanide.core.editor.SearchOptions
 import dev.titanide.core.editor.TextDiff
 import dev.titanide.core.editor.TextDocument
 import dev.titanide.core.editor.UndoStack
+import dev.titanide.core.editor.codeguard.CodeGuard
 import dev.titanide.core.model.Diagnostic
 import dev.titanide.core.model.Language
 import dev.titanide.core.model.Project
 import dev.titanide.core.model.ProjectFile
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -23,7 +25,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 
 data class EditorTab(
     val path: String,
@@ -35,16 +36,6 @@ data class EditorTab(
 )
 
 data class SearchHit(val path: String, val line: Int, val text: String)
-
-/** The subset of editor settings that affect how text is drawn. */
-data class EditorAppearance(
-    val fontSizeSp: Int = 13,
-    val lineHeightSp: Int = 20,
-    val tabWidth: Int = 4,
-    val wordWrap: Boolean = false,
-    val showLineNumbers: Boolean = true,
-    val fontFamily: String = "monospace",
-)
 
 data class EditorState(
     val project: Project? = null,
@@ -121,7 +112,7 @@ class EditorViewModel(private val container: TitanContainer) : ViewModel() {
                 val appearance = EditorAppearance(
                     // Clamped so a bad persisted value cannot make the editor unreadable.
                     fontSizeSp = settings.editor.fontSize.coerceIn(8, 32),
-                    lineHeightSp = settings.editor.lineHeight.coerceIn(10, 48),
+                    lineHeightSp = settings.editor.lineHeight.coerceIn(12, 48),
                     tabWidth = settings.editor.tabWidth.coerceIn(2, 8),
                     wordWrap = settings.editor.wordWrap,
                     showLineNumbers = settings.editor.showLineNumbers,

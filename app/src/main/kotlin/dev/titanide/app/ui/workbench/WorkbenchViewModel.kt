@@ -62,6 +62,16 @@ data class BufferState(
 /** A search hit in the project. */
 data class SearchHit(val path: String, val line: Int, val text: String)
 
+/** The subset of editor settings that affect how text is drawn. */
+data class EditorAppearance(
+    val fontSizeSp: Int = 13,
+    val lineHeightSp: Int = 20,
+    val tabWidth: Int = 4,
+    val wordWrap: Boolean = false,
+    val showLineNumbers: Boolean = true,
+    val fontFamily: String = "monospace",
+)
+
 /**
  * In-file find and replace. [matches] are character offsets into the buffer so the editor can
  * select one without re-running the search; [activeIndex] is the match the user is on.
@@ -109,6 +119,9 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
     private val _searchHits = MutableStateFlow<List<SearchHit>>(emptyList())
     val searchHits: StateFlow<List<SearchHit>> = _searchHits.asStateFlow()
 
+    private val _appearance = MutableStateFlow(EditorAppearance())
+    val appearance: StateFlow<EditorAppearance> = _appearance.asStateFlow()
+
     private val _find = MutableStateFlow(FindState())
     val find: StateFlow<FindState> = _find.asStateFlow()
 
@@ -142,6 +155,17 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
                 val target = current?.let { existing -> projects.firstOrNull { it.id == existing.id } }
                     ?: projects.maxByOrNull { it.lastOpenedAt }
                 if (target != null && target.id != current?.id) loadProject(target)
+            }
+        }
+        viewModelScope.launch {
+            container.settings.settings.collect { settings ->
+                _appearance.value = EditorAppearance(
+                    // Clamped so a corrupt persisted value cannot make the editor unreadable.
+                    fontSizeSp = settings.editor.fontSize.coerceIn(8, 32),
+                    lineHeightSp = settings.editor.lineHeight.coerceIn(12, 48),
+                    wordWrap = settings.editor.wordWrap,
+                    showLineNumbers = settings.editor.showLineNumbers,
+                )
             }
         }
         viewModelScope.launch {
