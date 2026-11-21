@@ -96,6 +96,17 @@ class GitRepositoryService {
 
     suspend fun stage(root: File, paths: List<String>): Outcome<Unit> = withContext(Dispatchers.IO) {
         val repo = open(root) ?: return@withContext Outcome.Failed("Not a Git repository")
+        // JGit's add() ignores a pattern that matches nothing, where git reports a pathspec
+        // error. Reporting it keeps a stage that did nothing from looking like a success.
+        val index = runCatching { repo.readDirCache() }.getOrNull()
+        val unmatched = paths.filter { path ->
+            !File(root, path).exists() && index?.getEntry(path) == null
+        }
+        if (unmatched.isNotEmpty()) {
+            return@withContext Outcome.Failed(
+                "pathspec '${unmatched.first()}' did not match any files",
+            )
+        }
         runCatching {
             Git(repo).use { git ->
                 val command = git.add()

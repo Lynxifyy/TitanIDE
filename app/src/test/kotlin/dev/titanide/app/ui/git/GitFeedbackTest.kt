@@ -184,4 +184,26 @@ class GitFeedbackTest {
         assertEquals("state was $state", "Repository initialised", state.message)
         assertNull(state.error)
     }
+
+    /**
+     * Staging is the one Git action whose failure was thrown away: the result was ignored and the
+     * view simply refreshed, so a file that could not be staged reappeared as unstaged with no
+     * explanation. Every other action reports its failure.
+     */
+    @Test
+    fun `a failed stage is reported instead of being ignored`() = runBlocking {
+        val viewModel = initialisedRepository()
+
+        // A path that does not exist in the working tree cannot be staged.
+        viewModel.stage("src/definitely-not-here.kt")
+
+        val deadline = System.currentTimeMillis() + 20_000
+        while (viewModel.state.value.error == null && System.currentTimeMillis() < deadline) {
+            Thread.sleep(25)
+        }
+        assertNotNull(
+            "a stage that did not happen must say so",
+            viewModel.state.value.error,
+        )
+    }
 }

@@ -127,29 +127,28 @@ class GitViewModel(
         refresh()
     }
 
-    fun stage(path: String) {
-        val root = requireRoot() ?: return
-        viewModelScope.launch {
-            container.gitService.stage(root, listOf(path))
-            refresh()
-        }
-    }
+    fun stage(path: String) = runStage(listOf(path))
 
     fun unstage(path: String) {
         val root = requireRoot() ?: return
         viewModelScope.launch {
-            container.gitService.unstage(root, listOf(path))
-            refresh()
+            when (val outcome = container.gitService.unstage(root, listOf(path))) {
+                is Outcome.Ok -> refresh()
+                is Outcome.Failed -> feedback(error = outcome.reason)
+            }
         }
     }
 
-    fun stageAll() {
-        val root = requireRoot() ?: return
-        val paths = _state.value.status.map { it.path }
+    fun stageAll() = runStage(_state.value.status.map { it.path })
+
+    private fun runStage(paths: List<String>) {
         if (paths.isEmpty()) return
+        val root = requireRoot() ?: return
         viewModelScope.launch {
-            container.gitService.stage(root, paths)
-            refresh()
+            when (val outcome = container.gitService.stage(root, paths)) {
+                is Outcome.Ok -> refresh()
+                is Outcome.Failed -> feedback(error = outcome.reason)
+            }
         }
     }
 
