@@ -8,6 +8,7 @@ import dev.titanide.core.model.ProjectCategory
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class ProjectsState(
@@ -36,20 +37,22 @@ class ProjectsViewModel(private val container: TitanContainer) : ViewModel() {
     init {
         viewModelScope.launch {
             container.projectRepository.observeProjects().collect { projects ->
-                _state.value = _state.value.copy(
-                    projects = projects.sortedByDescending { it.lastOpenedAt },
-                    loading = false,
-                )
+                _state.update {
+                    it.copy(
+                        projects = projects.sortedByDescending { it.lastOpenedAt },
+                        loading = false,
+                    )
+                }
             }
         }
     }
 
     fun setQuery(query: String) {
-        _state.value = _state.value.copy(query = query)
+        _state.update { it.copy(query = query) }
     }
 
     fun setFilter(category: ProjectCategory?) {
-        _state.value = _state.value.copy(categoryFilter = category)
+        _state.update { it.copy(categoryFilter = category) }
     }
 
     fun open(projectId: String) {
@@ -64,17 +67,19 @@ class ProjectsViewModel(private val container: TitanContainer) : ViewModel() {
 
     /** Deletion requires the caller to have confirmed; the row is removed only on success. */
     fun delete(project: Project) {
-        _state.value = _state.value.copy(deleting = project.id, error = null)
+        _state.update { it.copy(deleting = project.id, error = null) }
         viewModelScope.launch {
             val ok = container.projectRepository.deleteProject(project.id)
-            _state.value = _state.value.copy(
-                deleting = null,
-                error = if (ok) null else "Could not delete ${project.name}: files are still on disk",
-            )
+            _state.update {
+                it.copy(
+                    deleting = null,
+                    error = if (ok) null else "Could not delete ${project.name}: files are still on disk",
+                )
+            }
         }
     }
 
     fun clearError() {
-        _state.value = _state.value.copy(error = null)
+        _state.update { it.copy(error = null) }
     }
 }

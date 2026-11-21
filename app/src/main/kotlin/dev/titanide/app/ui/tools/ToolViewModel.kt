@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -47,7 +48,7 @@ class ToolViewModel(private val container: TitanContainer) : ViewModel() {
         viewModelScope.launch {
             container.projectRepository.observeProjects().collect { projects ->
                 val project = _state.value.project ?: projects.maxByOrNull { it.lastOpenedAt }
-                _state.value = _state.value.copy(projects = projects, project = project)
+                _state.update { it.copy(projects = projects, project = project) }
                 if (project != null && _state.value.assets.isEmpty() && _state.value.documents.isEmpty()) {
                     scan(project)
                 }
@@ -59,31 +60,35 @@ class ToolViewModel(private val container: TitanContainer) : ViewModel() {
     fun selectProject(projectId: String) {
         viewModelScope.launch {
             val project = container.projectRepository.getProject(projectId) ?: return@launch
-            _state.value = _state.value.copy(
-                project = project,
-                assets = emptyList(),
-                previews = emptyList(),
-                documents = emptyList(),
-                assetPreview = null,
-                documentContent = "",
-                openDocument = null,
-            )
+            _state.update {
+                it.copy(
+                    project = project,
+                    assets = emptyList(),
+                    previews = emptyList(),
+                    documents = emptyList(),
+                    assetPreview = null,
+                    documentContent = "",
+                    openDocument = null,
+                )
+            }
             scan(project)
         }
     }
 
     private fun scan(project: Project) {
         viewModelScope.launch {
-            _state.value = _state.value.copy(loading = true)
+            _state.update { it.copy(loading = true) }
             val result = withContext(Dispatchers.IO) {
                 ProjectScanner.scan(File(project.rootPath))
             }
-            _state.value = _state.value.copy(
-                assets = result.assets.map { AssetEntry(it.path, it.kind, it.size) },
-                previews = result.previews.map { PreviewEntry(it.path, it.kind, it.detail) },
-                documents = result.documents,
-                loading = false,
-            )
+            _state.update {
+                it.copy(
+                    assets = result.assets.map { AssetEntry(it.path, it.kind, it.size) },
+                    previews = result.previews.map { PreviewEntry(it.path, it.kind, it.detail) },
+                    documents = result.documents,
+                    loading = false,
+                )
+            }
             result.documents.firstOrNull()?.let(::openDocument)
         }
     }
@@ -102,7 +107,7 @@ class ToolViewModel(private val container: TitanContainer) : ViewModel() {
                     }
                 }.getOrElse { it.message ?: "Could not read file" }
             }
-            _state.value = _state.value.copy(assetPreview = path to text)
+            _state.update { it.copy(assetPreview = path to text) }
         }
     }
 
@@ -113,7 +118,7 @@ class ToolViewModel(private val container: TitanContainer) : ViewModel() {
                 runCatching { File(File(project.rootPath), path).readText().take(60_000) }
                     .getOrElse { "Could not read $path: ${it.message}" }
             }
-            _state.value = _state.value.copy(openDocument = path, documentContent = content)
+            _state.update { it.copy(openDocument = path, documentContent = content) }
         }
     }
 
@@ -128,7 +133,7 @@ class ToolViewModel(private val container: TitanContainer) : ViewModel() {
                 TableInfo("http_requests", dao.httpRequestDao().count()),
             )
         }
-        _state.value = _state.value.copy(tables = tables)
+        _state.update { it.copy(tables = tables) }
     }
 
     fun openTable(name: String) {
@@ -144,10 +149,12 @@ class ToolViewModel(private val container: TitanContainer) : ViewModel() {
                     else -> emptyList()
                 }
             }
-            _state.value = _state.value.copy(
-                openTable = name,
-                tableRows = rows.ifEmpty { listOf("No rows in $name.") },
-            )
+            _state.update {
+                it.copy(
+                    openTable = name,
+                    tableRows = rows.ifEmpty { listOf("No rows in $name.") },
+                )
+            }
         }
     }
 }

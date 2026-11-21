@@ -8,6 +8,7 @@ import dev.titanide.core.model.Project
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -35,16 +36,18 @@ class ProjectDetailViewModel(
                 val dir = File(p.rootPath)
                 if (dir.exists()) dir.walkTopDown().filter { it.isFile }.sumOf { it.length() } else 0L
             } ?: 0L
-            _state.value = _state.value.copy(
-                project = project,
-                fileCount = fileCount,
-                sizeBytes = size,
-                loading = false,
-            )
+            _state.update {
+                it.copy(
+                    project = project,
+                    fileCount = fileCount,
+                    sizeBytes = size,
+                    loading = false,
+                )
+            }
         }
         viewModelScope.launch {
             container.buildHistory.observeForProject(projectId).collect { records ->
-                _state.value = _state.value.copy(buildHistory = records)
+                _state.update { it.copy(buildHistory = records) }
             }
         }
     }

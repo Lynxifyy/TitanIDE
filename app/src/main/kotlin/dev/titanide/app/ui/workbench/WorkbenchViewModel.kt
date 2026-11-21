@@ -38,6 +38,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -192,12 +193,14 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
         _buffers.value = emptyMap()
         undoStack.clear()
         _diagnostics.value = emptyList()
-        _state.value = _state.value.copy(
-            projectName = project.name,
-            projectPath = project.rootPath,
-            groups = listOf(EditorGroup(0)),
-            activeGroupIndex = 0,
-        )
+        _state.update {
+            it.copy(
+                projectName = project.name,
+                projectPath = project.rootPath,
+                groups = listOf(EditorGroup(0)),
+                activeGroupIndex = 0,
+            )
+        }
         refreshFiles()
         container.connectAgent(project)
     }
@@ -308,15 +311,17 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
         )
         val errors = _diagnostics.value.count { it.severity == Severity.ERROR }
         val warnings = _diagnostics.value.count { it.severity == Severity.WARNING }
-        _state.value = _state.value.copy(
-            status = _state.value.status.copy(
-                languageId = LanguageDetector.displayName(LanguageDetector.detect(path)),
-                cursorLine = buffer.caretLine,
-                cursorColumn = buffer.caretColumn,
-                errorCount = errors,
-                warningCount = warnings,
-            ),
-        )
+        _state.update {
+            it.copy(
+                status = it.status.copy(
+                    languageId = LanguageDetector.displayName(LanguageDetector.detect(path)),
+                    cursorLine = buffer.caretLine,
+                    cursorColumn = buffer.caretColumn,
+                    errorCount = errors,
+                    warningCount = warnings,
+                ),
+            )
+        }
     }
 
     // -------------------------------------------------------------- editing
@@ -354,12 +359,14 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
         val buffer = _buffers.value[path] ?: return
         val updated = buffer.copy(caret = caret)
         _buffers.value = _buffers.value + (path to updated)
-        _state.value = _state.value.copy(
-            status = _state.value.status.copy(
-                cursorLine = updated.caretLine,
-                cursorColumn = updated.caretColumn,
-            ),
-        )
+        _state.update {
+            it.copy(
+                status = it.status.copy(
+                    cursorLine = updated.caretLine,
+                    cursorColumn = updated.caretColumn,
+                ),
+            )
+        }
     }
 
     fun save(path: String, silent: Boolean = false) {
@@ -462,12 +469,14 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
     private fun applyDiagnostics(buffer: BufferState, found: List<Diagnostic>) {
         if (_state.value.activeTab?.path == buffer.path) {
             _diagnostics.value = found
-            _state.value = _state.value.copy(
-                status = _state.value.status.copy(
-                    errorCount = found.count { it.severity == Severity.ERROR },
-                    warningCount = found.count { it.severity == Severity.WARNING },
-                ),
-            )
+            _state.update {
+                it.copy(
+                    status = it.status.copy(
+                        errorCount = found.count { it.severity == Severity.ERROR },
+                        warningCount = found.count { it.severity == Severity.WARNING },
+                    ),
+                )
+            }
         }
     }
 
@@ -719,7 +728,7 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
     }
 
     fun closeSidebar() {
-        _state.value = _state.value.copy(sidebarVisible = false)
+        _state.update { it.copy(sidebarVisible = false) }
     }
 
     fun toggleAgentPanel() {
@@ -732,7 +741,7 @@ class WorkbenchViewModel(private val container: TitanContainer) : ViewModel() {
     }
 
     fun toggleAndroidView() {
-        _state.value = _state.value.copy(androidViewMode = !_state.value.androidViewMode)
+        _state.update { it.copy(androidViewMode = !it.androidViewMode) }
     }
 
     fun toggleExpanded(path: String) {

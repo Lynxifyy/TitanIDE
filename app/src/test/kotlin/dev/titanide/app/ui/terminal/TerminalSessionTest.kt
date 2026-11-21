@@ -180,4 +180,43 @@ class TerminalSessionTest {
             viewModel.state.value.active!!.lines.size,
         )
     }
+
+    /**
+     * Two sessions pump output on their own threads. Appending used to read the session list
+     * outside the state update, so a line written by one session could be erased by the other
+     * and simply never appear.
+     */
+    @Test
+    fun `output from two sessions at once is never dropped`() {
+        val viewModel = newViewModel()
+        viewModel.newSession()
+        val first = viewModel.state.value.sessions[0].id
+        val second = viewModel.state.value.sessions[1].id
+        val expected = 150
+
+        // Both commands are started before either is awaited, so the pumps overlap.
+        viewModel.selectSession(0)
+        viewModel.submit("i=0; while [ \$i -lt $expected ]; do echo A\$i; i=\$((i+1)); done")
+        viewModel.selectSession(1)
+        viewModel.submit("i=0; while [ \$i -lt $expected ]; do echo B\$i; i=\$((i+1)); done")
+
+        runBlocking {
+            withTimeout(60_000) {
+                viewModel.state.first { state ->
+                    state.sessions.all { !it.running } &&
+                        state.sessions.all { it.lines.count { line -> !line.isCommand } >= expected }
+                }
+            }
+        }
+
+        val sessions = viewModel.state.value.sessions
+        val a = sessions.first { it.id == first }
+        val b = sessions.first { it.id == second }
+        assertEquals("session one lost output", expected, a.lines.count { it.text.startsWith("A") })
+        assertEquals("session two lost output", expected, b.lines.count { it.text.startsWith("B") })
+        assertTrue(
+            "each session keeps its own output",
+            a.lines.none { it.text.startsWith("B") } && b.lines.none { it.text.startsWith("A") },
+        )
+    }
 }

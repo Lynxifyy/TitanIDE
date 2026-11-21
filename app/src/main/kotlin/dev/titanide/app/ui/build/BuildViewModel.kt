@@ -13,6 +13,7 @@ import dev.titanide.core.model.ToolchainReport
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class BuildUiState(
@@ -37,13 +38,13 @@ class BuildViewModel(private val container: TitanContainer, initialProjectId: St
     init {
         viewModelScope.launch {
             container.projectRepository.observeProjects().collect { projects ->
-                _state.value = _state.value.copy(projects = projects)
+                _state.update { it.copy(projects = projects) }
                 if (_state.value.project == null) {
                     val project = projects.firstOrNull { it.id == currentProjectId }
                         ?: projects.maxByOrNull { it.lastOpenedAt }
                     if (project != null) {
                         currentProjectId = project.id
-                        _state.value = _state.value.copy(project = project)
+                        _state.update { it.copy(project = project) }
                     }
                 }
             }
@@ -51,29 +52,31 @@ class BuildViewModel(private val container: TitanContainer, initialProjectId: St
         viewModelScope.launch {
             container.buildEngine.active.collect { active ->
                 val running = active[currentProjectId]
-                _state.value = _state.value.copy(running = running)
+                _state.update { it.copy(running = running) }
             }
         }
         viewModelScope.launch {
             container.buildEngine.lastResult.collect { result ->
                 if (result == null) return@collect
                 if (result.request.projectId != currentProjectId) return@collect
-                _state.value = _state.value.copy(
-                    last = result,
-                    running = if (result.status == BuildStatus.RUNNING || result.status == BuildStatus.PREPARING) {
-                        result
-                    } else {
-                        null
-                    },
-                    logLines = result.logLines,
-                )
+                _state.update {
+                    it.copy(
+                        last = result,
+                        running = if (result.status == BuildStatus.RUNNING || result.status == BuildStatus.PREPARING) {
+                            result
+                        } else {
+                            null
+                        },
+                        logLines = result.logLines,
+                    )
+                }
             }
         }
         viewModelScope.launch {
             container.buildEngine.logs.collect { logs ->
                 val active = _state.value.running ?: return@collect
                 logs[active.id]?.let { lines ->
-                    _state.value = _state.value.copy(logLines = lines)
+                    _state.update { it.copy(logLines = lines) }
                 }
             }
         }
@@ -82,7 +85,7 @@ class BuildViewModel(private val container: TitanContainer, initialProjectId: St
                 val target = settings?.build?.defaultTargetId?.let {
                     ExecutionTarget.entries.firstOrNull { e -> e.id == it }
                 } ?: ExecutionTarget.LOCAL
-                _state.value = _state.value.copy(target = target)
+                _state.update { it.copy(target = target) }
             }
         }
         probeToolchains()
@@ -92,20 +95,20 @@ class BuildViewModel(private val container: TitanContainer, initialProjectId: St
         viewModelScope.launch {
             val project = container.projectRepository.getProject(projectId) ?: return@launch
             currentProjectId = projectId
-            _state.value = _state.value.copy(project = project, last = null, logLines = emptyList())
+            _state.update { it.copy(project = project, last = null, logLines = emptyList()) }
         }
     }
 
     fun setTarget(target: ExecutionTarget) {
-        _state.value = _state.value.copy(target = target)
+        _state.update { it.copy(target = target) }
     }
 
     fun probeToolchains() {
         if (_state.value.probing) return
-        _state.value = _state.value.copy(probing = true)
+        _state.update { it.copy(probing = true) }
         viewModelScope.launch {
             val report = runCatching { container.toolchainProbe.probeAll() }.getOrNull()
-            _state.value = _state.value.copy(toolchains = report, probing = false)
+            _state.update { it.copy(toolchains = report, probing = false) }
         }
     }
 
@@ -113,10 +116,10 @@ class BuildViewModel(private val container: TitanContainer, initialProjectId: St
     fun run(kind: BuildKind, task: String? = null) {
         val project = _state.value.project ?: return
         if (container.buildEngine.isRunning(project.id)) {
-            _state.value = _state.value.copy(message = "A build is already running for this project")
+            _state.update { it.copy(message = "A build is already running for this project") }
             return
         }
-        _state.value = _state.value.copy(logLines = emptyList(), last = null, message = null)
+        _state.update { it.copy(logLines = emptyList(), last = null, message = null) }
         container.buildEngine.start(
             BuildRequest(
                 projectId = project.id,
@@ -134,6 +137,6 @@ class BuildViewModel(private val container: TitanContainer, initialProjectId: St
     }
 
     fun clearMessage() {
-        _state.value = _state.value.copy(message = null)
+        _state.update { it.copy(message = null) }
     }
 }

@@ -13,6 +13,7 @@ import dev.titanide.core.templates.TemplateCatalog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.UUID
@@ -86,35 +87,39 @@ class CreateProjectViewModel(private val container: TitanContainer) : ViewModel(
     val state: StateFlow<CreateState> = _state.asStateFlow()
 
     fun selectCategory(category: ProjectCategory) {
-        _state.value = _state.value.copy(
-            category = category,
-            step = WizardStep.TEMPLATE,
-            template = null,
-            selectedGame = null,
-            error = null,
-        )
+        _state.update {
+            it.copy(
+                category = category,
+                step = WizardStep.TEMPLATE,
+                template = null,
+                selectedGame = null,
+                error = null,
+            )
+        }
     }
 
     fun selectGame(game: GameDefinition?) {
-        _state.value = _state.value.copy(selectedGame = game, template = null)
+        _state.update { it.copy(selectedGame = game, template = null) }
     }
 
     fun selectTemplate(template: ProjectTemplate) {
         val derivedPackage = suggestPackage(template, _state.value.name)
-        _state.value = _state.value.copy(
-            step = WizardStep.CONFIGURE,
-            template = template,
-            language = template.languages.firstOrNull(),
-            packageName = if (_state.value.packageName.isBlank() || _state.value.packageName == "com.example.app") {
-                derivedPackage
-            } else {
-                _state.value.packageName
-            },
-            applicationId = _state.value.applicationId.ifBlank { derivedPackage },
-            minSdk = template.minSdk ?: _state.value.minSdk,
-            targetSdk = template.targetSdk ?: _state.value.targetSdk,
-            error = null,
-        )
+        _state.update {
+            it.copy(
+                step = WizardStep.CONFIGURE,
+                template = template,
+                language = template.languages.firstOrNull(),
+                packageName = if (it.packageName.isBlank() || it.packageName == "com.example.app") {
+                    derivedPackage
+                } else {
+                    it.packageName
+                },
+                applicationId = it.applicationId.ifBlank { derivedPackage },
+                minSdk = template.minSdk ?: it.minSdk,
+                targetSdk = template.targetSdk ?: it.targetSdk,
+                error = null,
+            )
+        }
     }
 
     fun back() {
@@ -132,52 +137,54 @@ class CreateProjectViewModel(private val container: TitanContainer) : ViewModel(
     }
 
     fun openGamePicker() {
-        _state.value = _state.value.copy(step = WizardStep.GAME)
+        _state.update { it.copy(step = WizardStep.GAME) }
     }
 
     fun setName(value: String) {
         val trimmed = value.take(60)
-        _state.value = _state.value.copy(
-            name = trimmed,
-            packageName = if (_state.value.applicationId.isBlank()) {
-                suggestPackage(_state.value.template, trimmed)
-            } else {
-                _state.value.packageName
-            },
-        )
+        _state.update {
+            it.copy(
+                name = trimmed,
+                packageName = if (it.applicationId.isBlank()) {
+                    suggestPackage(it.template, trimmed)
+                } else {
+                    it.packageName
+                },
+            )
+        }
     }
 
     fun setPackageName(value: String) {
-        _state.value = _state.value.copy(packageName = value.trim())
+        _state.update { it.copy(packageName = value.trim()) }
     }
 
     fun setApplicationId(value: String) {
-        _state.value = _state.value.copy(applicationId = value.trim())
+        _state.update { it.copy(applicationId = value.trim()) }
     }
 
     fun setMinSdk(value: Int) {
-        _state.value = _state.value.copy(minSdk = value)
+        _state.update { it.copy(minSdk = value) }
     }
 
     fun setTargetSdk(value: Int) {
-        _state.value = _state.value.copy(targetSdk = value)
+        _state.update { it.copy(targetSdk = value) }
     }
 
     fun setLanguage(language: Language) {
-        _state.value = _state.value.copy(language = language)
+        _state.update { it.copy(language = language) }
     }
 
     fun setLocation(value: String) {
-        _state.value = _state.value.copy(customLocation = value)
+        _state.update { it.copy(customLocation = value) }
     }
 
     fun review() {
         val error = _state.value.validationError()
         if (error != null) {
-            _state.value = _state.value.copy(error = error)
+            _state.update { it.copy(error = error) }
             return
         }
-        _state.value = _state.value.copy(step = WizardStep.REVIEW, error = null)
+        _state.update { it.copy(step = WizardStep.REVIEW, error = null) }
     }
 
     /**
@@ -225,21 +232,23 @@ class CreateProjectViewModel(private val container: TitanContainer) : ViewModel(
             when (val outcome = container.scaffolder.create(spec, projectId, targetDir)) {
                 is CreateProjectOutcome.Success -> {
                     container.projectRepository.register(outcome.project)
-                    _state.value = _state.value.copy(
-                        creating = false,
-                        createdProjectId = outcome.project.id,
-                        notes = outcome.notes,
-                    )
+                    _state.update {
+                        it.copy(
+                            creating = false,
+                            createdProjectId = outcome.project.id,
+                            notes = outcome.notes,
+                        )
+                    }
                 }
                 is CreateProjectOutcome.Failure -> {
-                    _state.value = _state.value.copy(creating = false, error = outcome.reason)
+                    _state.update { it.copy(creating = false, error = outcome.reason) }
                 }
             }
         }
     }
 
     fun clearError() {
-        _state.value = _state.value.copy(error = null)
+        _state.update { it.copy(error = null) }
     }
 
     private fun suggestPackage(template: ProjectTemplate?, name: String): String {

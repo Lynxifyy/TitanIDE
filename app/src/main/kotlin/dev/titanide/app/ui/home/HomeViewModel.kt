@@ -8,6 +8,7 @@ import dev.titanide.core.model.ToolchainInfo
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class HomeState(
@@ -30,10 +31,12 @@ class HomeViewModel(private val container: TitanContainer) : ViewModel() {
     init {
         viewModelScope.launch {
             container.projectRepository.observeProjects().collect { projects ->
-                _state.value = _state.value.copy(
-                    recentProjects = projects.sortedByDescending { it.lastOpenedAt }.take(6),
-                    loading = false,
-                )
+                _state.update {
+                    it.copy(
+                        recentProjects = projects.sortedByDescending { it.lastOpenedAt }.take(6),
+                        loading = false,
+                    )
+                }
             }
         }
         viewModelScope.launch {
@@ -44,40 +47,46 @@ class HomeViewModel(private val container: TitanContainer) : ViewModel() {
                 } else {
                     finished.count { it.status == "SUCCEEDED" }.toDouble() / finished.size
                 }
-                _state.value = _state.value.copy(buildSuccessRate = rate, totalBuilds = records.size)
+                _state.update { it.copy(buildSuccessRate = rate, totalBuilds = records.size) }
             }
         }
         viewModelScope.launch {
-            _state.value = _state.value.copy(
-                storageUsed = container.storageUsedBytes(),
-                gitHubConnected = container.isGitHubSignedIn(),
-                aiConfigured = container.currentSettings()?.ai?.providerId?.let { it != "none" && it.isNotBlank() }
-                    ?: false,
-            )
+            _state.update {
+                it.copy(
+                    storageUsed = container.storageUsedBytes(),
+                    gitHubConnected = container.isGitHubSignedIn(),
+                    aiConfigured = container.currentSettings()?.ai?.providerId?.let { it != "none" && it.isNotBlank() }
+                        ?: false,
+                )
+            }
         }
         probeToolchains()
     }
 
     fun probeToolchains() {
         if (_state.value.probingToolchains) return
-        _state.value = _state.value.copy(probingToolchains = true)
+        _state.update { it.copy(probingToolchains = true) }
         viewModelScope.launch {
             val report = runCatching { container.toolchainProbe.probeAll() }.getOrNull()
-            _state.value = _state.value.copy(
-                toolchains = report?.tools.orEmpty(),
-                probingToolchains = false,
-            )
+            _state.update {
+                it.copy(
+                    toolchains = report?.tools.orEmpty(),
+                    probingToolchains = false,
+                )
+            }
         }
     }
 
     fun refreshStatus() {
         viewModelScope.launch {
-            _state.value = _state.value.copy(
-                storageUsed = container.storageUsedBytes(),
-                gitHubConnected = container.isGitHubSignedIn(),
-                aiConfigured = container.currentSettings()?.ai?.providerId?.let { it != "none" && it.isNotBlank() }
-                    ?: false,
-            )
+            _state.update {
+                it.copy(
+                    storageUsed = container.storageUsedBytes(),
+                    gitHubConnected = container.isGitHubSignedIn(),
+                    aiConfigured = container.currentSettings()?.ai?.providerId?.let { it != "none" && it.isNotBlank() }
+                        ?: false,
+                )
+            }
         }
     }
 }

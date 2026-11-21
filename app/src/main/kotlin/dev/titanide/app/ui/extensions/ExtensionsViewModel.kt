@@ -8,6 +8,7 @@ import dev.titanide.core.data.db.ExtensionEntity
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
@@ -133,7 +134,7 @@ class ExtensionsViewModel(private val container: TitanContainer) : ViewModel() {
                 val enabled = ExtensionsUiState.BUILT_INS.associate { ext ->
                     ext.id to (if (ext.alwaysOn) true else byId[ext.id]?.enabled ?: false)
                 }
-                _state.value = _state.value.copy(enabled = enabled, loading = false)
+                _state.update { it.copy(enabled = enabled, loading = false) }
             }
         }
     }
@@ -141,7 +142,7 @@ class ExtensionsViewModel(private val container: TitanContainer) : ViewModel() {
     /** Persists the toggle. Always-on extensions are core code and cannot be disabled. */
     fun setEnabled(extension: BuiltInExtension, enabled: Boolean) {
         if (extension.alwaysOn) {
-            _state.value = _state.value.copy(message = "${extension.name} is built into TITAN and cannot be disabled")
+            _state.update { it.copy(message = "${extension.name} is built into TITAN and cannot be disabled") }
             return
         }
         viewModelScope.launch {
@@ -158,13 +159,15 @@ class ExtensionsViewModel(private val container: TitanContainer) : ViewModel() {
                     manifestJson = """{"id":"${extension.id}","capabilities":${extension.capabilities.size}}""",
                 ),
             )
-            _state.value = _state.value.copy(
-                message = "${extension.name} ${if (enabled) "enabled" else "disabled"}",
-            )
+            _state.update {
+                it.copy(
+                    message = "${extension.name} ${if (enabled) "enabled" else "disabled"}",
+                )
+            }
         }
     }
 
     fun clearMessage() {
-        _state.value = _state.value.copy(message = null)
+        _state.update { it.copy(message = null) }
     }
 }

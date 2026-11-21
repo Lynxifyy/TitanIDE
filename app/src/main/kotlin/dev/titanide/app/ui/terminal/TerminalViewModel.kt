@@ -8,6 +8,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -56,10 +57,12 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
                 "sh",
                 listOf("-c", "echo \$0; uname -s 2>/dev/null || true"),
             )
-            _state.value = _state.value.copy(
-                shellAvailable = available,
-                shellPath = if (available) "/system/bin/sh" else null,
-            )
+            _state.update {
+                it.copy(
+                    shellAvailable = available,
+                    shellPath = if (available) "/system/bin/sh" else null,
+                )
+            }
             newSession()
             appendSystem(
                 if (available) {
@@ -81,7 +84,7 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
             cwd = cwd,
         )
         val sessions = _state.value.sessions + session
-        _state.value = _state.value.copy(sessions = sessions, activeIndex = sessions.lastIndex)
+        _state.update { it.copy(sessions = sessions, activeIndex = sessions.lastIndex) }
     }
 
     fun closeSession(index: Int) {
@@ -90,15 +93,17 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
         container.processRunner.cancel(session.id)
         val sessions = _state.value.sessions.toMutableList()
         sessions.removeAt(index)
-        _state.value = _state.value.copy(
-            sessions = sessions,
-            activeIndex = _state.value.activeIndex.coerceAtMost((sessions.size - 1).coerceAtLeast(0)),
-        )
+        _state.update {
+            it.copy(
+                sessions = sessions,
+                activeIndex = it.activeIndex.coerceAtMost((sessions.size - 1).coerceAtLeast(0)),
+            )
+        }
     }
 
     fun selectSession(index: Int) {
         if (index in _state.value.sessions.indices) {
-            _state.value = _state.value.copy(activeIndex = index)
+            _state.update { it.copy(activeIndex = index) }
         }
     }
 
@@ -106,18 +111,18 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
         val history = _state.value.history
         if (history.isEmpty()) return
         val cursor = (_state.value.historyCursor + 1).coerceAtMost(history.lastIndex)
-        _state.value = _state.value.copy(historyCursor = cursor)
+        _state.update { it.copy(historyCursor = cursor) }
     }
 
     fun nextHistory() {
         val cursor = (_state.value.historyCursor - 1).coerceAtMost(0)
-        _state.value = _state.value.copy(historyCursor = cursor)
+        _state.update { it.copy(historyCursor = cursor) }
     }
 
     /** Called when the user types, so history browsing restarts from the newest entry. */
     fun resetHistoryCursor() {
         if (_state.value.historyCursor != -1) {
-            _state.value = _state.value.copy(historyCursor = -1)
+            _state.update { it.copy(historyCursor = -1) }
         }
     }
 
@@ -141,19 +146,23 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
         // silently start in the old directory. The session's cwd is what actually persists.
         if (trimmed == "cd" || trimmed.startsWith("cd ") || trimmed.startsWith("cd\t")) {
             appendLine("$ ${session.cwd} $ $trimmed", isCommand = true)
-            _state.value = _state.value.copy(
-                history = listOf(trimmed) + _state.value.history,
-                historyCursor = -1,
-            )
+            _state.update {
+                it.copy(
+                    history = listOf(trimmed) + it.history,
+                    historyCursor = -1,
+                )
+            }
             val target = trimmed.removePrefix("cd").trim().trim('"', '\'')
             changeDirectory(target.ifEmpty { "~" })
             return
         }
 
-        _state.value = _state.value.copy(
-            history = listOf(trimmed) + _state.value.history,
-            historyCursor = -1,
-        )
+        _state.update {
+            it.copy(
+                history = listOf(trimmed) + it.history,
+                historyCursor = -1,
+            )
+        }
         appendLine("$ ${session.cwd.substringAfterLast('/')} $ $trimmed", isCommand = true)
         setRunning(session.id, true)
 
@@ -205,7 +214,7 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
         val index = sessions.indexOfFirst { it.id == session.id }
         if (index >= 0) {
             sessions[index] = sessions[index].copy(lines = emptyList())
-            _state.value = _state.value.copy(sessions = sessions)
+            _state.update { it.copy(sessions = sessions) }
         }
     }
 
@@ -232,7 +241,7 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
             return
         }
         sessions[index] = sessions[index].copy(cwd = canonical.absolutePath)
-        _state.value = _state.value.copy(sessions = sessions)
+        _state.update { it.copy(sessions = sessions) }
     }
 
     private fun appendSystem(text: String) {
@@ -245,22 +254,34 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
         appendTo(session.id, TerminalLine(text, isCommand, isError))
     }
 
+    /**
+     * Output arrives on the pump thread while the user may be closing or switching sessions, so the
+     * line has to be appended inside the update. Reading the list first dropped lines that another
+     * write landed in between.
+     */
     private fun appendTo(sessionId: String, line: TerminalLine) {
-        val sessions = _state.value.sessions.toMutableList()
-        val index = sessions.indexOfFirst { it.id == sessionId }
-        if (index < 0) return
-        val session = sessions[index]
-        val lines = (session.lines + line).takeLast(MAX_LINES)
-        sessions[index] = session.copy(lines = lines)
-        _state.value = _state.value.copy(sessions = sessions)
+        _state.update { state ->
+            val index = state.sessions.indexOfFirst { it.id == sessionId }
+            if (index < 0) return@update state
+            val session = state.sessions[index]
+            state.copy(
+                sessions = state.sessions.toMutableList().also {
+                    it[index] = session.copy(lines = (session.lines + line).takeLast(MAX_LINES))
+                },
+            )
+        }
     }
 
     private fun setRunning(sessionId: String, running: Boolean, exitCode: Int? = null) {
-        val sessions = _state.value.sessions.toMutableList()
-        val index = sessions.indexOfFirst { it.id == sessionId }
-        if (index < 0) return
-        sessions[index] = sessions[index].copy(running = running, exitCode = exitCode)
-        _state.value = _state.value.copy(sessions = sessions)
+        _state.update { state ->
+            val index = state.sessions.indexOfFirst { it.id == sessionId }
+            if (index < 0) return@update state
+            state.copy(
+                sessions = state.sessions.toMutableList().also {
+                    it[index] = it[index].copy(running = running, exitCode = exitCode)
+                },
+            )
+        }
     }
 
     override fun onCleared() {

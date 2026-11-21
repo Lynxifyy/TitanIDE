@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -49,25 +50,25 @@ class ApiTesterViewModel(private val container: TitanContainer) : ViewModel() {
     init {
         viewModelScope.launch {
             container.database.httpRequestDao().observeAll().collect { history ->
-                _state.value = _state.value.copy(history = history)
+                _state.update { it.copy(history = history) }
             }
         }
     }
 
     fun setMethod(method: String) {
-        _state.value = _state.value.copy(method = method)
+        _state.update { it.copy(method = method) }
     }
 
     fun setUrl(url: String) {
-        _state.value = _state.value.copy(url = url)
+        _state.update { it.copy(url = url) }
     }
 
     fun setHeaders(headers: String) {
-        _state.value = _state.value.copy(headers = headers)
+        _state.update { it.copy(headers = headers) }
     }
 
     fun setBody(body: String) {
-        _state.value = _state.value.copy(body = body)
+        _state.update { it.copy(body = body) }
     }
 
     /** Executes the request for real. Failures are reported as failures. */
@@ -125,18 +126,20 @@ class ApiTesterViewModel(private val container: TitanContainer) : ViewModel() {
                 ),
             )
 
-            _state.value = _state.value.copy(running = false, result = result)
+            _state.update { it.copy(running = false, result = result) }
         }
     }
 
     fun loadHistory(entry: HttpRequestEntity) {
-        _state.value = _state.value.copy(
-            method = entry.method,
-            url = entry.url,
-            headers = entry.headersJson,
-            body = entry.body,
-            result = null,
-        )
+        _state.update {
+            it.copy(
+                method = entry.method,
+                url = entry.url,
+                headers = entry.headersJson,
+                body = entry.body,
+                result = null,
+            )
+        }
     }
 
     fun deleteHistory(id: String) {

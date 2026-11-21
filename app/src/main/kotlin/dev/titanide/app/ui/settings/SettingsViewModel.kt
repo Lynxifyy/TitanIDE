@@ -13,6 +13,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class DeviceFlowUi(
@@ -48,66 +49,76 @@ class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
     init {
         viewModelScope.launch {
             container.settings.settings.collect { snapshot ->
-                _state.value = _state.value.copy(
-                    settings = snapshot,
-                    aiKeyStored = container.credentials.contains(CredentialKey.AI_API_KEY),
-                    remoteTokenStored = container.credentials.contains(CredentialKey.REMOTE_AGENT_TOKEN),
-                    openCodeTokenStored = container.credentials.contains(CredentialKey.OPENCODE_TOKEN),
-                )
+                _state.update {
+                    it.copy(
+                        settings = snapshot,
+                        aiKeyStored = container.credentials.contains(CredentialKey.AI_API_KEY),
+                        remoteTokenStored = container.credentials.contains(CredentialKey.REMOTE_AGENT_TOKEN),
+                        openCodeTokenStored = container.credentials.contains(CredentialKey.OPENCODE_TOKEN),
+                    )
+                }
             }
         }
         // Whether sign-in is even possible is fixed at build time, so read it once.
-        _state.value = _state.value.copy(
-            gitHubOAuthAvailable = container.deviceFlow.isConfigured(),
-        )
+        _state.update {
+            it.copy(
+                gitHubOAuthAvailable = container.deviceFlow.isConfigured(),
+            )
+        }
         viewModelScope.launch {
             refreshGitHubIdentity()
-            _state.value = _state.value.copy(storageUsed = container.storageUsedBytes())
+            _state.update { it.copy(storageUsed = container.storageUsedBytes()) }
         }
         probeToolchains()
     }
 
     fun probeToolchains() {
         if (_state.value.probing) return
-        _state.value = _state.value.copy(probing = true)
+        _state.update { it.copy(probing = true) }
         viewModelScope.launch {
             val report = runCatching { container.toolchainProbe.probeAll() }.getOrNull()
-            _state.value = _state.value.copy(toolchains = report?.tools.orEmpty(), probing = false)
+            _state.update { it.copy(toolchains = report?.tools.orEmpty(), probing = false) }
         }
     }
 
     suspend fun refreshGitHubIdentity() {
         if (!container.isGitHubSignedIn()) {
-            _state.value = _state.value.copy(gitHubSignedIn = false, gitHubLogin = null)
+            _state.update { it.copy(gitHubSignedIn = false, gitHubLogin = null) }
             return
         }
         val login = container.gitHubApi.currentUser().getOrNull()
-        _state.value = _state.value.copy(
-            gitHubSignedIn = container.isGitHubSignedIn(),
-            gitHubLogin = login,
-        )
+        _state.update {
+            it.copy(
+                gitHubSignedIn = container.isGitHubSignedIn(),
+                gitHubLogin = login,
+            )
+        }
     }
 
     // ---- GitHub device flow -------------------------------------------------
 
     fun startGitHubSignIn() {
         if (_state.value.deviceFlow?.waiting == true) return
-        _state.value = _state.value.copy(deviceFlow = DeviceFlowUi(waiting = true))
+        _state.update { it.copy(deviceFlow = DeviceFlowUi(waiting = true)) }
         viewModelScope.launch {
             val start = runCatching { container.deviceFlow.requestDeviceCode().getOrThrow() }
             start.onFailure { error ->
-                _state.value = _state.value.copy(
-                    deviceFlow = DeviceFlowUi(error = error.message ?: "Could not start GitHub sign-in"),
-                )
+                _state.update {
+                    it.copy(
+                        deviceFlow = DeviceFlowUi(error = error.message ?: "Could not start GitHub sign-in"),
+                    )
+                }
             }
             val code = start.getOrNull() ?: return@launch
-            _state.value = _state.value.copy(
-                deviceFlow = DeviceFlowUi(
-                    userCode = code.userCode,
-                    verificationUri = code.verificationUri,
-                    waiting = true,
-                ),
-            )
+            _state.update {
+                it.copy(
+                    deviceFlow = DeviceFlowUi(
+                        userCode = code.userCode,
+                        verificationUri = code.verificationUri,
+                        waiting = true,
+                    ),
+                )
+            }
 
             pollJob?.cancel()
             pollJob = viewModelScope.launch {
@@ -118,74 +129,88 @@ class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
                         is DeviceFlowAuth.PollOutcome.Authorized -> {
                             val stored = container.credentials.put(CredentialKey.GITHUB_TOKEN, outcome.token)
                             if (!stored) {
-                                _state.value = _state.value.copy(
-                                    deviceFlow = DeviceFlowUi(
-                                        error = "Signed in, but the token could not be saved to the Keystore. " +
-                                            "The session will not survive a restart.",
-                                    ),
-                                )
+                                _state.update {
+                                    it.copy(
+                                        deviceFlow = DeviceFlowUi(
+                                            error = "Signed in, but the token could not be saved to the Keystore. " +
+                                                "The session will not survive a restart.",
+                                        ),
+                                    )
+                                }
                                 return@launch
                             }
                             container.setGitHubToken(outcome.token)
                             // Report the state GitHub actually resolved, not an assumption.
                             val resolved = container.gitHubAuth.value
-                            _state.value = _state.value.copy(
-                                deviceFlow = null,
-                                gitHubSignedIn = resolved.isSignedIn,
-                                gitHubLogin = (resolved as? GitHubAuthState.SignedIn)?.login,
-                                message = when {
-                                    resolved.isSignedIn -> "Signed in to GitHub"
-                                    resolved is GitHubAuthState.Expired -> "GitHub rejected the new token"
-                                    resolved is GitHubAuthState.Error -> "Signed in, but GitHub was unreachable"
-                                    else -> "Signed in"
-                                },
-                            )
+                            _state.update {
+                                it.copy(
+                                    deviceFlow = null,
+                                    gitHubSignedIn = resolved.isSignedIn,
+                                    gitHubLogin = (resolved as? GitHubAuthState.SignedIn)?.login,
+                                    message = when {
+                                        resolved.isSignedIn -> "Signed in to GitHub"
+                                        resolved is GitHubAuthState.Expired -> "GitHub rejected the new token"
+                                        resolved is GitHubAuthState.Error -> "Signed in, but GitHub was unreachable"
+                                        else -> "Signed in"
+                                    },
+                                )
+                            }
                             return@launch
                         }
                         is DeviceFlowAuth.PollOutcome.Pending -> Unit
                         is DeviceFlowAuth.PollOutcome.SlowDown -> delay(3000)
                         is DeviceFlowAuth.PollOutcome.Expired -> {
-                            _state.value = _state.value.copy(
-                                deviceFlow = DeviceFlowUi(error = "The code expired. Start again."),
-                            )
+                            _state.update {
+                                it.copy(
+                                    deviceFlow = DeviceFlowUi(error = "The code expired. Start again."),
+                                )
+                            }
                             return@launch
                         }
                         is DeviceFlowAuth.PollOutcome.Denied -> {
-                            _state.value = _state.value.copy(
-                                deviceFlow = DeviceFlowUi(error = "Authorisation was denied."),
-                            )
+                            _state.update {
+                                it.copy(
+                                    deviceFlow = DeviceFlowUi(error = "Authorisation was denied."),
+                                )
+                            }
                             return@launch
                         }
                         is DeviceFlowAuth.PollOutcome.Failed -> {
-                            _state.value = _state.value.copy(
-                                deviceFlow = DeviceFlowUi(error = outcome.reason),
-                            )
+                            _state.update {
+                                it.copy(
+                                    deviceFlow = DeviceFlowUi(error = outcome.reason),
+                                )
+                            }
                             return@launch
                         }
                         null -> Unit
                     }
                 }
-                _state.value = _state.value.copy(
-                    deviceFlow = DeviceFlowUi(error = "Timed out waiting for authorisation."),
-                )
+                _state.update {
+                    it.copy(
+                        deviceFlow = DeviceFlowUi(error = "Timed out waiting for authorisation."),
+                    )
+                }
             }
         }
     }
 
     fun cancelDeviceFlow() {
         pollJob?.cancel()
-        _state.value = _state.value.copy(deviceFlow = null)
+        _state.update { it.copy(deviceFlow = null) }
     }
 
     fun signOutGitHub() {
         viewModelScope.launch {
             container.credentials.remove(CredentialKey.GITHUB_TOKEN)
             container.setGitHubToken(null)
-            _state.value = _state.value.copy(
-                gitHubSignedIn = false,
-                gitHubLogin = null,
-                message = "Signed out of GitHub",
-            )
+            _state.update {
+                it.copy(
+                    gitHubSignedIn = false,
+                    gitHubLogin = null,
+                    message = "Signed out of GitHub",
+                )
+            }
         }
     }
 
@@ -196,14 +221,16 @@ class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
         viewModelScope.launch {
             val stored = container.credentials.put(CredentialKey.AI_API_KEY, key)
             container.refreshCredentials()
-            _state.value = _state.value.copy(
-                aiKeyStored = stored,
-                message = if (stored) {
-                    "API key stored in the Android Keystore"
-                } else {
-                    "The Keystore refused the key, so it was not saved"
-                },
-            )
+            _state.update {
+                it.copy(
+                    aiKeyStored = stored,
+                    message = if (stored) {
+                        "API key stored in the Android Keystore"
+                    } else {
+                        "The Keystore refused the key, so it was not saved"
+                    },
+                )
+            }
         }
     }
 
@@ -211,7 +238,7 @@ class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
         viewModelScope.launch {
             container.credentials.remove(CredentialKey.AI_API_KEY)
             container.refreshCredentials()
-            _state.value = _state.value.copy(aiKeyStored = false, message = "API key removed")
+            _state.update { it.copy(aiKeyStored = false, message = "API key removed") }
         }
     }
 
@@ -220,10 +247,12 @@ class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
         viewModelScope.launch {
             val stored = container.credentials.put(CredentialKey.REMOTE_AGENT_TOKEN, token)
             container.refreshCredentials()
-            _state.value = _state.value.copy(
-                remoteTokenStored = stored,
-                message = if (stored) "Remote agent token stored" else "The Keystore refused the token, so it was not saved",
-            )
+            _state.update {
+                it.copy(
+                    remoteTokenStored = stored,
+                    message = if (stored) "Remote agent token stored" else "The Keystore refused the token, so it was not saved",
+                )
+            }
         }
     }
 
@@ -231,7 +260,7 @@ class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
         viewModelScope.launch {
             container.credentials.remove(CredentialKey.REMOTE_AGENT_TOKEN)
             container.refreshCredentials()
-            _state.value = _state.value.copy(remoteTokenStored = false, message = "Remote agent token removed")
+            _state.update { it.copy(remoteTokenStored = false, message = "Remote agent token removed") }
         }
     }
 
@@ -296,17 +325,19 @@ class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
         if (token.isBlank()) return
         viewModelScope.launch {
             val stored = container.credentials.put(CredentialKey.OPENCODE_TOKEN, token)
-            _state.value = _state.value.copy(
-                openCodeTokenStored = stored,
-                message = if (stored) "OpenCode token stored" else "The Keystore refused the token, so it was not saved",
-            )
+            _state.update {
+                it.copy(
+                    openCodeTokenStored = stored,
+                    message = if (stored) "OpenCode token stored" else "The Keystore refused the token, so it was not saved",
+                )
+            }
         }
     }
 
     fun clearOpenCodeToken() {
         viewModelScope.launch {
             container.credentials.remove(CredentialKey.OPENCODE_TOKEN)
-            _state.value = _state.value.copy(openCodeTokenStored = false, message = "OpenCode token removed")
+            _state.update { it.copy(openCodeTokenStored = false, message = "OpenCode token removed") }
         }
     }
 
@@ -350,6 +381,6 @@ class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
     }
 
     fun clearMessage() {
-        _state.value = _state.value.copy(message = null)
+        _state.update { it.copy(message = null) }
     }
 }
