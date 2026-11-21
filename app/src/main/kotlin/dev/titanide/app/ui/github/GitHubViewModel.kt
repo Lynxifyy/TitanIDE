@@ -170,16 +170,19 @@ class GitHubViewModel(
                 }
                 return@launch
             }
-            val branches = container.gitHubApi.listBranches(owner, name).getOrDefault(emptyList())
-            val commits = container.gitHubApi.listCommits(owner, name, repo?.defaultBranch).getOrDefault(emptyList())
-            val entries = container.gitHubApi.listContents(owner, name, "").getOrDefault(emptyList())
+            // A failed listing is not an empty repository. Showing zero branches and zero files
+            // after a 401 or a rate limit reads as "your code is gone", so report the reason.
+            val branches = container.gitHubApi.listBranches(owner, name)
+            val commits = container.gitHubApi.listCommits(owner, name, repo.defaultBranch)
+            val entries = container.gitHubApi.listContents(owner, name, "")
             _detail.update {
                 it.copy(
                     repo = repo,
-                    branches = branches,
-                    commits = commits,
-                    entries = entries,
+                    branches = branches.getOrDefault(emptyList()),
+                    commits = commits.getOrDefault(emptyList()),
+                    entries = entries.getOrDefault(emptyList()),
                     loading = false,
+                    error = entries.exceptionOrNull()?.let { e -> e.message ?: "Could not list files" },
                 )
             }
         }
@@ -188,11 +191,16 @@ class GitHubViewModel(
     fun openPath(path: String) {
         val repo = _detail.value.repo ?: return
         viewModelScope.launch {
-            _detail.update { it.copy(loading = true) }
-            val entries = container.gitHubApi
-                .listContents(repo.owner, repo.name, path, repo.defaultBranch)
-                .getOrDefault(emptyList())
-            _detail.update { it.copy(entries = entries, path = path, loading = false) }
+            _detail.update { it.copy(loading = true, error = null) }
+            val entries = container.gitHubApi.listContents(repo.owner, repo.name, path, repo.defaultBranch)
+            _detail.update {
+                it.copy(
+                    entries = entries.getOrDefault(emptyList()),
+                    path = path,
+                    loading = false,
+                    error = entries.exceptionOrNull()?.let { e -> e.message ?: "Could not open $path" },
+                )
+            }
         }
     }
 

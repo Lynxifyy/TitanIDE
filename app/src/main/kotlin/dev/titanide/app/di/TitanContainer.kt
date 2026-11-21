@@ -60,7 +60,11 @@ import java.io.IOException
  * construction order is explicit, and the wiring stays testable because every collaborator
  * takes its dependencies as constructor parameters.
  */
-class TitanContainer(private val context: Context) {
+class TitanContainer(
+    private val context: Context,
+    /** Overridable so tests can point the GitHub client at a local server. */
+    gitHubApiBase: String = "https://api.github.com",
+) {
 
     private companion object {
         const val TAG = "TitanContainer"
@@ -122,7 +126,9 @@ class TitanContainer(private val context: Context) {
 
     val gitService: GitRepositoryService by lazy { GitRepositoryService() }
 
-    val gitHubApi: GitHubApiClient by lazy { GitHubApiClient(tokenProvider = { gitHubToken.value }) }
+    val gitHubApi: GitHubApiClient by lazy {
+        GitHubApiClient(tokenProvider = { gitHubToken.value }, apiBase = gitHubApiBase)
+    }
 
     val deviceFlow: DeviceFlowAuth by lazy { DeviceFlowAuth(clientId = BuildConfig.GITHUB_CLIENT_ID) }
 
