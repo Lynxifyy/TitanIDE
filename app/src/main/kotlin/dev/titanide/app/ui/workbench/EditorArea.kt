@@ -2,6 +2,7 @@ package dev.titanide.app.ui.workbench
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,6 +24,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Redo
+import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -38,6 +41,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.Modifier
@@ -52,6 +64,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.titanide.core.designsystem.TitanColors
+import dev.titanide.core.editor.EditorCommand
+import dev.titanide.core.editor.KeyBindings
+import dev.titanide.core.editor.KeyChord
+import dev.titanide.core.editor.KeyName
 import dev.titanide.core.model.Diagnostic
 import dev.titanide.core.model.Severity
 import dev.titanide.core.workbench.EditorGroup
@@ -78,6 +94,8 @@ fun EditorArea(
     onToggleComment: () -> Unit,
     onFormat: () -> Unit,
     onIndent: (Boolean) -> Unit,
+    onUndo: () -> Unit = {},
+    onRedo: () -> Unit = {},
     modifier: Modifier = Modifier,
     showGutter: Boolean = true,
     find: FindState = FindState(),
@@ -106,6 +124,11 @@ fun EditorArea(
                 buffer = buffer,
                 diagnostics = diagnostics,
                 onChange = onChange,
+                onSave = onSave,
+                onUndo = onUndo,
+                onRedo = onRedo,
+                onToggleComment = onToggleComment,
+                onFormat = onFormat,
                 modifier = Modifier.weight(1f),
                 showGutter = showGutter && appearance.showLineNumbers,
                 activeMatch = find.current,
@@ -131,6 +154,8 @@ fun EditorArea(
                 onToggleComment = onToggleComment,
                 onFormat = onFormat,
                 onIndent = onIndent,
+                onUndo = onUndo,
+                onRedo = onRedo,
                 onFind = { onFindQueryChange(find.query) },
             )
         } else {
@@ -242,6 +267,11 @@ private fun CodeSurface(
     buffer: BufferState,
     diagnostics: List<Diagnostic>,
     onChange: (String, Int) -> Unit,
+    onSave: () -> Unit,
+    onUndo: () -> Unit,
+    onRedo: () -> Unit,
+    onToggleComment: () -> Unit,
+    onFormat: () -> Unit,
     modifier: Modifier = Modifier,
     showGutter: Boolean = true,
     activeMatch: IntRange? = null,
@@ -266,6 +296,29 @@ private fun CodeSurface(
     }
     val vertical = rememberScrollState()
     val horizontal = rememberScrollState()
+    val focusRequester = remember { FocusRequester() }
+    // A Bluetooth keyboard drives the editor through these bindings. Every one of them has a
+    // touch equivalent in the status strip, so nothing here is the only way to reach a feature.
+    fun handleKey(event: androidx.compose.ui.input.key.KeyEvent): Boolean {
+        if (event.type != KeyEventType.KeyDown) return false
+        val name = when (event.key) {
+            Key.Z -> KeyName.Z
+            Key.Y -> KeyName.Y
+            Key.S -> KeyName.S
+            Key.Slash -> KeyName.SLASH
+            Key.F -> KeyName.F
+            else -> KeyName.UNKNOWN
+        }
+        val chord = KeyChord(name, ctrl = event.isCtrlPressed, shift = event.isShiftPressed)
+        return when (KeyBindings.commandFor(chord)) {
+            EditorCommand.UNDO -> { onUndo(); true }
+            EditorCommand.REDO -> { onRedo(); true }
+            EditorCommand.SAVE -> { onSave(); true }
+            EditorCommand.TOGGLE_COMMENT -> { onToggleComment(); true }
+            EditorCommand.FORMAT -> { onFormat(); true }
+            null -> false
+        }
+    }
 
     // The field owns the selection; the buffer only knows the caret offset. Syncing the
     // other way (buffer -> field) is needed for undo, format and comment toggles.
@@ -363,6 +416,8 @@ private fun CodeSurface(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
+                .focusRequester(focusRequester)
+                .onPreviewKeyEvent(::handleKey)
                 .then(if (appearance.wordWrap) Modifier else Modifier.horizontalScroll(horizontal))
                 .verticalScroll(vertical)
                 .drawBehind {
@@ -389,6 +444,8 @@ private fun EditorStatusStrip(
     onToggleComment: () -> Unit,
     onFormat: () -> Unit,
     onIndent: (Boolean) -> Unit,
+    onUndo: () -> Unit,
+    onRedo: () -> Unit,
     onFind: () -> Unit,
 ) {
     val errors = diagnostics.count { it.severity == Severity.ERROR }
@@ -408,6 +465,10 @@ private fun EditorStatusStrip(
             StatusChip("No problems", TitanColors.Success)
         }
         Spacer(Modifier.weight(1f))
+        // Undo has to be reachable by touch: a phone has no Ctrl+Z, and an edit that cannot be
+        // taken back is not usable.
+        ActionChip("Undo", onUndo)
+        ActionChip("Redo", onRedo)
         ActionChip("Find", onFind)
         ActionChip("Comment", onToggleComment)
         ActionChip("Format", onFormat)
@@ -549,7 +610,7 @@ private fun NoFileOpen() {
             )
             Spacer(Modifier.height(14.dp))
             Text(
-                text = "Ctrl+S saves  ·  Ctrl+/ comments  ·  Ctrl+Z undoes",
+                text = "Ctrl+S saves  ·  Ctrl+/ comments  ·  Ctrl+Z undoes  ·  Ctrl+Shift+Z redoes",
                 color = TitanColors.TextMuted.copy(alpha = 0.5f),
                 fontSize = 10.sp,
             )
