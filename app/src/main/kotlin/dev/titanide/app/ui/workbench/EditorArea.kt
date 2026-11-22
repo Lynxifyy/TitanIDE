@@ -101,6 +101,7 @@ fun EditorArea(
     onRedo: () -> Unit = {},
     onGoToDefinition: () -> Unit = {},
     onFindReferences: () -> Unit = {},
+    onRename: () -> Unit = {},
     referenceTarget: String? = null,
     references: List<SymbolReference> = emptyList(),
     onOpenReference: (SymbolReference) -> Unit = {},
@@ -140,6 +141,7 @@ fun EditorArea(
                 onFormat = onFormat,
                 onGoToDefinition = onGoToDefinition,
                 onFindReferences = onFindReferences,
+                onRename = onRename,
                 modifier = Modifier.weight(1f),
                 showGutter = showGutter && appearance.showLineNumbers,
                 activeMatch = find.current,
@@ -178,6 +180,7 @@ fun EditorArea(
                 onFind = { onFindQueryChange(find.query) },
                 onGoToDefinition = onGoToDefinition,
                 onFindReferences = onFindReferences,
+                onRename = onRename,
             )
         } else {
             NoFileOpen()
@@ -295,6 +298,7 @@ private fun CodeSurface(
     onFormat: () -> Unit,
     onGoToDefinition: () -> Unit = {},
     onFindReferences: () -> Unit = {},
+    onRename: () -> Unit = {},
     referenceTarget: String? = null,
     references: List<SymbolReference> = emptyList(),
     onOpenReference: (SymbolReference) -> Unit = {},
@@ -335,6 +339,7 @@ private fun CodeSurface(
             Key.Slash -> KeyName.SLASH
             Key.F -> KeyName.F
             Key.F12 -> KeyName.F12
+            Key.F2 -> KeyName.F2
             else -> KeyName.UNKNOWN
         }
         val chord = KeyChord(name, ctrl = event.isCtrlPressed, shift = event.isShiftPressed)
@@ -346,6 +351,7 @@ private fun CodeSurface(
             EditorCommand.FORMAT -> { onFormat(); true }
             EditorCommand.GO_TO_DEFINITION -> { onGoToDefinition(); true }
             EditorCommand.FIND_REFERENCES -> { onFindReferences(); true }
+            EditorCommand.RENAME -> { onRename(); true }
             null -> false
         }
     }
@@ -479,6 +485,7 @@ private fun EditorStatusStrip(
     onFind: () -> Unit,
     onGoToDefinition: () -> Unit,
     onFindReferences: () -> Unit,
+    onRename: () -> Unit,
 ) {
     val errors = diagnostics.count { it.severity == Severity.ERROR }
     val warnings = diagnostics.count { it.severity == Severity.WARNING }
@@ -504,6 +511,7 @@ private fun EditorStatusStrip(
         // Navigation has to be tappable for the same reason: there is no F12 on a phone.
         ActionChip("Definition", onGoToDefinition)
         ActionChip("References", onFindReferences)
+        ActionChip("Rename", onRename)
         ActionChip("Find", onFind)
         ActionChip("Comment", onToggleComment)
         ActionChip("Format", onFormat)

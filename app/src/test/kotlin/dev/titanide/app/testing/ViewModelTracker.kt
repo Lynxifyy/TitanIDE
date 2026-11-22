@@ -1,6 +1,7 @@
 package dev.titanide.app.testing
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -23,6 +24,20 @@ object ViewModelTracker {
     private val live = java.util.Collections.synchronizedList(mutableListOf<ViewModel>())
 
     /**
+     * Stores whose ViewModels were created by Compose rather than by the test.
+     *
+     * A screen rendered in a test builds its ViewModel through `viewModel { ... }`, which the
+     * test never sees, so [track] cannot cover it. Clearing the store reaches them.
+     */
+    private val stores = java.util.Collections.synchronizedList(mutableListOf<ViewModelStoreOwner>())
+
+    /** Registers a store so [clearAll] clears it. */
+    fun trackStore(owner: ViewModelStoreOwner): ViewModelStoreOwner {
+        stores += owner
+        return owner
+    }
+
+    /**
      * `ViewModel.clear()` is Kotlin-`internal`, so its JVM name is name-mangled. Looking the
      * mangled name up directly is deliberate: a failed lookup must fail the test, not leave
      * the leak in place while every test still passes.
@@ -37,6 +52,15 @@ object ViewModelTracker {
     }
 
     fun clearAll() {
+        // Compose-created ViewModels first: their collectors are the ones still querying the
+        // database when the container closes, which surfaced as an unrelated class failing.
+        val owners = synchronized(stores) {
+            val copy = stores.toList()
+            stores.clear()
+            copy
+        }
+        owners.forEach { owner -> runCatching { owner.viewModelStore.clear() } }
+
         val pending = synchronized(live) {
             val copy = live.toList()
             live.clear()

@@ -18,6 +18,7 @@ disabled placeholder.
 | --- | --- | --- |
 | Project scaffolding | 4 categories, 20+ languages, game mod catalog | `core/templates`, `ProjectScaffolder` tests |
 | Code editor | Tokenizer, undo stack, incremental diff, search, CodeGuard analysis, project-wide symbol index for go-to-definition / find-references / go-to-symbol | `core/editor` tests |
+| Rename symbol | Token-aware rename across the project, previewed before any write, undoable | `RenamePlannerTest`, `RenameSymbolTest` |
 | Project file system | Sandboxed read/write/move/copy, zip-slip hardened extraction | `core/data` `SafeFileSystem` tests |
 | Git | Clone, commit, branch, checkout, merge, push, pull, diff, log via JGit | `core/git` tests |
 | GitHub | Device-flow OAuth, repo browse, clone-to-project, remote test | `core/git` + app UI |
@@ -50,6 +51,10 @@ TITAN does not pretend. These are platform limits, not unfinished work:
   in `core/editor`, and references are matched on real lexer tokens, so identifiers inside
   comments and strings are not reported. This resolves names, not types — it will not tell
   you which overload a call binds to.
+- **Type-aware rename.** Rename is token-based for the same reason: it renames the symbol
+  you picked, not the same name declared in an unrelated class, and it will not rename a
+  member that happens to share a name. Each rename is previewed with the file list before
+  anything is written, and the result is a single undo entry per file.
 
 ## Architecture
 

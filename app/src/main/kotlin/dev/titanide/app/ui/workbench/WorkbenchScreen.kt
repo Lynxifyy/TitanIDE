@@ -84,6 +84,8 @@ fun WorkbenchScreen(
     val searchHits by viewModel.searchHits.collectAsStateWithLifecycle()
     val symbolResults by viewModel.symbolResults.collectAsStateWithLifecycle()
     val references by viewModel.references.collectAsStateWithLifecycle()
+    val pendingRename by viewModel.pendingRename.collectAsStateWithLifecycle()
+    val renameTarget by viewModel.renameTarget.collectAsStateWithLifecycle()
     val referenceTarget by viewModel.referenceTarget.collectAsStateWithLifecycle()
     val find by viewModel.find.collectAsStateWithLifecycle()
     val appearance by viewModel.appearance.collectAsStateWithLifecycle()
@@ -216,6 +218,7 @@ fun WorkbenchScreen(
                                 onRedo = viewModel::redo,
                                 onGoToDefinition = viewModel::goToDefinition,
                                 onFindReferences = viewModel::findReferences,
+                                onRename = viewModel::beginRename,
                                 referenceTarget = referenceTarget,
                                 references = references,
                                 onOpenReference = { reference ->
@@ -431,6 +434,58 @@ fun WorkbenchScreen(
                 TextButton(onClick = viewModel::cancelPendingClose) {
                     Text("Keep editing", color = TitanColors.Primary)
                 }
+            },
+        )
+    }
+
+    renameTarget?.let { oldName ->
+        RenameSymbolDialog(
+            oldName = oldName,
+            onDismiss = viewModel::cancelBeginRename,
+            onConfirm = viewModel::renameSymbol,
+        )
+    }
+
+    pendingRename?.let { plan ->
+        AlertDialog(
+            onDismissRequest = viewModel::cancelRename,
+            title = { Text("Rename ${plan.oldName}?", style = MaterialTheme.typography.titleMedium) },
+            text = {
+                Column {
+                    Text(
+                        text = "${plan.newName} in ${plan.changedFiles.size} file" +
+                            (if (plan.changedFiles.size == 1) "" else "s") +
+                            ", ${plan.totalOccurrences} occurrence" +
+                            (if (plan.totalOccurrences == 1) "" else "s") + ".",
+                        color = TitanColors.TextMuted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    // The user is asked to confirm a write to files they may not have open, so
+                    // every one of them is named rather than summarised as a count.
+                    plan.changedFiles.take(6).forEach { change ->
+                        Text(
+                            text = "${change.filePath}  (${change.occurrences})",
+                            color = TitanColors.TextPrimary,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (plan.changedFiles.size > 6) {
+                        Text(
+                            text = "and ${plan.changedFiles.size - 6} more",
+                            color = TitanColors.TextMuted,
+                            fontSize = 11.sp,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::applyRename) { Text("Rename", color = TitanColors.Primary) }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelRename) { Text("Cancel", color = TitanColors.TextMuted) }
             },
         )
     }
@@ -806,4 +861,48 @@ private fun SnackMessage(text: String, onDismiss: () -> Unit) {
             Text(text = text, color = TitanColors.TextPrimary, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
+}
+
+/**
+ * Asks for the new name of a symbol.
+ *
+ * Separate from [NamePromptDialog] because the value being typed is an identifier, not a path:
+ * the hint and the placeholder differ, and a path-shaped hint here would mislead.
+ */
+@Composable
+private fun RenameSymbolDialog(
+    oldName: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var value by remember(oldName) { mutableStateOf(oldName) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Rename symbol", style = MaterialTheme.typography.titleMedium) },
+        text = {
+            Column {
+                Text(
+                    text = "Every reference to $oldName in the project is rewritten. " +
+                        "You will see the list before anything is written.",
+                    color = TitanColors.TextMuted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Spacer(Modifier.height(8.dp))
+                SearchField(
+                    value = value,
+                    onValueChange = { value = it },
+                    placeholder = "newName",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(value.trim()) },
+                enabled = value.isNotBlank() && value.trim() != oldName,
+            ) { Text("Preview", color = TitanColors.Primary) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        containerColor = TitanColors.Surface,
+    )
 }

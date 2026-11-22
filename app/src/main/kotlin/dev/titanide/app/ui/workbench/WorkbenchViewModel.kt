@@ -8,6 +8,8 @@ import dev.titanide.core.data.files.SafeFileSystem
 import dev.titanide.core.editor.codeguard.CodeGuard
 import dev.titanide.core.engine.InstallOutcome
 import dev.titanide.core.editor.EditorEngine
+import dev.titanide.core.editor.RenamePlan
+import dev.titanide.core.editor.RenamePlanner
 import dev.titanide.core.editor.SearchEngine
 import dev.titanide.core.editor.SearchOptions
 import dev.titanide.core.editor.SymbolDeclaration
@@ -163,6 +165,14 @@ class WorkbenchViewModel(
     /** The name the references panel is currently showing, or null when it is closed. */
     private val _referenceTarget = MutableStateFlow<String?>(null)
     val referenceTarget: StateFlow<String?> = _referenceTarget.asStateFlow()
+
+    /** The symbol the user asked to rename, before a new name has been typed. */
+    private val _renameTarget = MutableStateFlow<String?>(null)
+    val renameTarget: StateFlow<String?> = _renameTarget.asStateFlow()
+
+    /** A rename waiting for the user to confirm it. Nothing is written until they do. */
+    private val _pendingRename = MutableStateFlow<RenamePlan?>(null)
+    val pendingRename: StateFlow<RenamePlan?> = _pendingRename.asStateFlow()
 
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
@@ -856,6 +866,143 @@ class WorkbenchViewModel(
     fun closeReferences() {
         _referenceTarget.value = null
         _references.value = emptyList()
+    }
+
+    // ---------------------------------------------------------------- rename
+
+    /**
+     * Resolves the symbol under the caret and asks the user for a new name.
+     *
+     * The name has to be typed somewhere, so this only finds the old one; [renameSymbol]
+     * receives the new one from the prompt.
+     */
+    fun beginRename() {
+        val path = _state.value.activeTab?.path ?: return
+        val buffer = _buffers.value[path] ?: return
+        val caret = buffer.caret
+        viewModelScope.launch {
+            ensureIndex()
+            val name = symbolIndex.identifierAt(path, caret)
+            if (name == null) {
+                _message.value = "Put the caret on a symbol to rename it"
+                return@launch
+            }
+            _renameTarget.value = name
+        }
+    }
+
+    /** Abandons the rename prompt without planning anything. */
+    fun cancelBeginRename() {
+        _renameTarget.value = null
+    }
+
+    /**
+     * Plans a rename of the symbol under the caret.
+     *
+     * The plan is only shown: renaming across files is destructive, so the user sees every
+     * file and occurrence that would change before anything is written.
+     */
+    fun renameSymbol(newName: String) {
+        _renameTarget.value = null
+        val path = _state.value.activeTab?.path ?: return
+        val buffer = _buffers.value[path] ?: return
+        val caret = buffer.caret
+        viewModelScope.launch {
+            ensureIndex()
+            val oldName = symbolIndex.identifierAt(path, caret)
+            if (oldName == null) {
+                _message.value = "Put the caret on a symbol to rename it"
+                return@launch
+            }
+            val plan = planRename(oldName, newName)
+            val rejection = plan.rejection
+            if (rejection != null) {
+                _message.value = rejection
+                _pendingRename.value = null
+                return@launch
+            }
+            _pendingRename.value = plan
+        }
+    }
+
+    /** Drops a rename the user decided not to apply. */
+    fun cancelRename() {
+        _pendingRename.value = null
+    }
+
+    /**
+     * Writes a confirmed rename.
+     *
+     * Each changed file is recorded on its own undo stack, so the rename can be taken back
+     * one file at a time exactly like a typed edit.
+     */
+    fun applyRename() {
+        val plan = _pendingRename.value ?: return
+        val project = _project.value ?: return
+        _pendingRename.value = null
+        viewModelScope.launch {
+            var written = 0
+            val failures = ArrayList<String>()
+            for (change in plan.changedFiles) {
+                when (val result = container.fileTreeRepository.write(project, change.filePath, change.after)) {
+                    is SafeFileSystem.Result.Ok -> {
+                        written++
+                        // Record on every changed file, not only the open ones, so undo covers
+                        // the whole rename rather than just what happened to be on screen.
+                        val (_, record) = TextDocument.of(change.before)
+                            .replace(0 until change.before.length, change.after)
+                        undoStackFor(change.filePath).record(record)
+                        if (_buffers.value.containsKey(change.filePath)) {
+                            // The new text is already on disk, so the buffer is marked saved
+                            // rather than written a second time. A second write raced the
+                            // save's own message and could overwrite this one.
+                            applyText(change.filePath, change.after)
+                            _buffers.update { buffers ->
+                                val latest = buffers[change.filePath] ?: return@update buffers
+                                buffers + (change.filePath to latest.copy(savedContent = change.after))
+                            }
+                            _state.value = _state.value.setDirty(change.filePath, false)
+                        }
+                    }
+
+                    is SafeFileSystem.Result.Failure -> failures += "${change.filePath}: ${result.reason}"
+                }
+            }
+            refreshFiles()
+            symbolIndex.clear()
+            _message.value = when {
+                failures.isNotEmpty() -> "Renamed $written file(s); failed: ${failures.joinToString("; ")}"
+                else -> "Renamed ${plan.oldName} to ${plan.newName} in $written file(s)"
+            }
+        }
+    }
+
+    private suspend fun planRename(oldName: String, newName: String): RenamePlan {
+        val project = _project.value
+        val sources = LinkedHashMap<String, String>()
+        val languages = HashMap<String, Language>()
+        _buffers.value.forEach { (path, buffer) ->
+            sources[path] = buffer.content
+            languages[path] = buffer.language
+        }
+        if (project != null) {
+            withContext(Dispatchers.Default) {
+                val onDisk = container.fileTreeRepository.list(project)
+                    .filter { it.kind == FileKind.FILE && it.path !in sources }
+                    .map { it.path }
+                    .take(MAX_INDEXED_FILES)
+                for (path in onDisk) {
+                    val read = container.fileTreeRepository.read(project, path)
+                    if (read is SafeFileSystem.Result.Ok) {
+                        sources[path] = read.value
+                        languages[path] = Language.fromFileName(path)
+                    }
+                }
+            }
+        }
+        return withContext(Dispatchers.Default) {
+            RenamePlanner.plan(sources, languages, oldName, newName)
+        }
     }
 
     private fun moveCaretTo(line: Int, column: Int) {

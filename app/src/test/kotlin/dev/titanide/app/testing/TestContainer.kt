@@ -44,7 +44,18 @@ object TestContainers {
     }
 }
 
-/** Closes every container [TestContainers.create] handed out during the test. */
+/**
+ * Closes every container [TestContainers.create] handed out during the test.
+ *
+ * ViewModels are cleared *before* the databases close. A rendered screen builds its ViewModel
+ * through `viewModel { ... }`, so the test never sees it and cannot clear it in its own
+ * `@After`; the ViewModel's collector was then still querying a database this rule had just
+ * closed, and the failure surfaced in whichever class ran next. Clearing here makes the order
+ * the same for every test class.
+ */
 class CloseContainersRule : ExternalResource() {
-    override fun after() = TestContainers.closeAll()
+    override fun after() {
+        ViewModelTracker.clearAll()
+        TestContainers.closeAll()
+    }
 }

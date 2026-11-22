@@ -2,6 +2,9 @@ package dev.titanide.app.ui
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import dev.titanide.app.LocalContainer
@@ -57,9 +60,25 @@ class ScreenRenderTest {
     private fun render(screen: @Composable () -> Unit) =
         renderWith(TestContainers.create(), screen)
 
+    /**
+     * The owner the rendered screens build their ViewModels against.
+     *
+     * Providing our own store is what lets the rule clear them: `viewModel { ... }` inside a
+     * screen would otherwise put the instance somewhere the test cannot reach, and its
+     * collector kept querying a database that teardown had already closed.
+     */
+    private val viewModelOwner = ViewModelTracker.trackStore(
+        object : ViewModelStoreOwner {
+            override val viewModelStore = ViewModelStore()
+        },
+    )
+
     private fun renderWith(container: TitanContainer, screen: @Composable () -> Unit) {
         compose.setContent {
-            CompositionLocalProvider(LocalContainer provides container) {
+            CompositionLocalProvider(
+                LocalContainer provides container,
+                LocalViewModelStoreOwner provides viewModelOwner,
+            ) {
                 TitanTheme { screen() }
             }
         }
@@ -172,6 +191,8 @@ class ScreenRenderTest {
 
     @After
     fun clearTrackedViewModels() {
+        // The rule clears as well; doing it here too keeps a failure in this class from
+        // leaking into the next one even if the rule's teardown is skipped.
         ViewModelTracker.clearAll()
     }
 }
