@@ -1,6 +1,7 @@
 package dev.titanide.core.engine
 
 import android.util.Log
+import dev.titanide.core.data.security.SecureCredentialStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
@@ -108,7 +109,11 @@ class ProcessRunner(private val scope: CoroutineScope) {
         }
 
         val lines = ArrayList<String>(512)
-        fun record(line: String) {
+        // Everything a process prints passes through here: the returned lines, the caller's
+        // callback and the event stream. A build log is rendered in the app and handed to the
+        // AI as context, so a token a tool echoes must be masked before anyone can read it.
+        fun record(raw: String) {
+            val line = SecureCredentialStore.scrub(raw)
             synchronized(lines) { if (lines.size < maxLines) lines += line }
             onLine?.invoke(line)
             _events.tryEmit(Event.Line(sessionId, line))

@@ -4,6 +4,7 @@ import dev.titanide.core.data.files.ProjectDetector
 import dev.titanide.core.data.files.SafeFileSystem
 import dev.titanide.core.data.repo.BuildHistoryRepository
 import dev.titanide.core.model.Artifact
+import dev.titanide.core.data.security.SecureCredentialStore
 import dev.titanide.core.model.BuildKind
 import dev.titanide.core.model.BuildRequest
 import dev.titanide.core.model.BuildResult
@@ -598,10 +599,14 @@ class BuildEngine(
 
             val parsed = LogParser.parse(outcome.logLines, outcome.exitCode)
             val reading = reportedTestSummary(request.kind, parsed.testSummary, request.projectPath)
+            // Process output is already scrubbed where it is read, but the remote backends
+            // collect their log over HTTP, so the choke point every backend passes through
+            // scrubs once more rather than trusting each one to remember.
+            val cleanLog = outcome.logLines.map(SecureCredentialStore::scrub)
             val logLines = if (reading.notes.isEmpty()) {
-                outcome.logLines
+                cleanLog
             } else {
-                outcome.logLines + reading.notes
+                cleanLog + reading.notes
             }
             val finishedAt = System.currentTimeMillis()
             val result = BuildResult(
@@ -616,7 +621,8 @@ class BuildEngine(
                 diagnostics = parsed.diagnostics,
                 artifacts = outcome.artifacts,
                 testSummary = parsed.testSummary ?: reading.summary,
-                failureReason = outcome.failureReason ?: parsed.failureReason,
+                failureReason = (outcome.failureReason ?: parsed.failureReason)
+                    ?.let(SecureCredentialStore::scrub),
                 executorLabel = outcome.executorLabel,
                 projectKind = outcome.projectKind,
             )

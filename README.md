@@ -34,7 +34,7 @@ disabled placeholder.
 | Extensions | Built-in catalogue with a real toggle; the switch and the capability gate agree, and every gated capability is checked where the feature is used | `ExtensionToggleStateTest`, `CapabilityGateTest` |
 | Developer tools | API tester, Asset Studio, Database Viewer, UI Preview and Docs read real project and database data; a table that is counted can be opened and its row count matches | `DatabaseViewerTest` |
 | Persistence | Room (projects, builds, tabs, extensions, HTTP history), DataStore settings | `core/data` tests |
-| Credentials | Keystore-backed encrypted store, redaction helpers | `core/data` `SecureCredentialStore` |
+| Credentials | Keystore-backed encrypted store; every line a build process or remote agent prints is scrubbed of tokens before it is shown or sent to the AI | `core/data` `SecureCredentialStore`, `CredentialScrubTest`, `BuildLogScrubbingTest` |
 | UI | 7 primary destinations plus detail routes, phone/tablet adaptive shell | `app` route tests |
 
 ## What does not work on-device, and why

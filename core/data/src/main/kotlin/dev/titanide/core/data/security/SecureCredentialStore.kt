@@ -67,17 +67,30 @@ class SecureCredentialStore(private val context: Context) {
             return if (secret.length <= 8) "****" else "${secret.take(4)}...${secret.takeLast(4)}"
         }
 
-        /** Removes anything resembling a token from text destined for logs or AI prompts. */
+        /**
+         * Removes anything resembling a token from text destined for logs or AI prompts.
+         *
+         * Only a short, recognisable head survives so the reader can tell which credential was
+         * masked. Keeping "everything before the first colon or space" was wrong: a token that
+         * stands on its own has no separator, so the whole secret was kept and `<redacted>` was
+         * appended to it.
+         */
         fun scrub(text: String): String {
             var scrubbed = text
             TOKEN_PATTERNS.forEach { pattern ->
-                scrubbed = pattern.replace(scrubbed) { match ->
-                    val value = match.value
-                    val prefix = value.takeWhile { it != ':' && it != '=' && !it.isWhitespace() }
-                    "$prefix<redacted>"
-                }
+                scrubbed = pattern.replace(scrubbed) { match -> maskToken(match.value) }
             }
             return scrubbed
+        }
+
+        /**
+         * Masks one match. `Bearer` and `Authorization` matches carry their header, which is
+         * worth keeping, so only the part after the first separator is dropped.
+         */
+        private fun maskToken(value: String): String {
+            val separator = value.indexOfFirst { it == ':' || it == '=' || it.isWhitespace() }
+            if (separator < 0) return "<redacted>"
+            return value.substring(0, separator + 1) + "<redacted>"
         }
 
         private val TOKEN_PATTERNS = listOf(
