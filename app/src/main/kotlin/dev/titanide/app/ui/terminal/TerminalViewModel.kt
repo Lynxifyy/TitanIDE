@@ -161,7 +161,7 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
         // run inside one would move that process and vanish with it; the next command would
         // silently start in the old directory. The session's cwd is what actually persists.
         if (trimmed == "cd" || trimmed.startsWith("cd ") || trimmed.startsWith("cd\t")) {
-            appendLine("$ ${session.cwd} $ $trimmed", isCommand = true)
+            appendLine("${session.cwd} $ $trimmed", isCommand = true)
             _state.update {
                 it.copy(
                     history = listOf(trimmed) + it.history,
@@ -179,7 +179,7 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
                 historyCursor = -1,
             )
         }
-        appendLine("$ ${session.cwd.substringAfterLast('/')} $ $trimmed", isCommand = true)
+        appendLine("${session.cwd.substringAfterLast('/')} $ $trimmed", isCommand = true)
         setRunning(session.id, true)
 
         val job = viewModelScope.launch {
