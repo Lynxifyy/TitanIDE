@@ -462,6 +462,27 @@ class ToolchainProbeTest {
     }
 
     @Test
+    fun `a tool reachable only through its home variable is not reported missing`() = runBlocking {
+        // A JDK installed outside PATH is the normal case on Android: the app is told where it
+        // is through JAVA_HOME. The probe read that variable and then discarded it, so the
+        // settings screen said "OpenJDK: missing" while the SDK panel reported the same JDK.
+        val home = temp.newFolder("jdk")
+        val bin = File(home, "bin").apply { mkdirs() }
+        val java = File(bin, "java").apply { writeText("#!/bin/sh\necho 'openjdk 21'\n") }
+        assertTrue("the fixture must be executable", java.setExecutable(true))
+
+        val probe = ToolchainProbe(runner, env = { name -> if (name == "JAVA_HOME") home.absolutePath else null })
+        val javaHomeSpec = ToolchainProbe.ToolSpec("java", "OpenJDK", "java", listOf("-version"), "JAVA_HOME")
+        val info = probe.probeOne(javaHomeSpec)
+
+        assertEquals(
+            "the executable under JAVA_HOME/bin must be found even when it is not on PATH",
+            java.absolutePath,
+            info.path,
+        )
+    }
+
+    @Test
     fun `android sdk entry is always present`() = runBlocking {
         val report = ToolchainProbe(runner).probeAll()
         assertTrue(report.tools.any { it.id == "android_sdk" })

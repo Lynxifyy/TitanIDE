@@ -15,7 +15,11 @@ import java.io.File
  * of these are absent, which is exactly the information the UI needs to route builds
  * to a remote agent instead of pretending a local build is possible.
  */
-class ToolchainProbe(private val runner: ProcessRunner) {
+class ToolchainProbe(
+    private val runner: ProcessRunner,
+    /** Where a tool's home variable is read from. Injected so a test can supply one. */
+    private val env: (String) -> String? = System::getenv,
+) {
 
     data class ToolSpec(
         val id: String,
@@ -60,10 +64,21 @@ class ToolchainProbe(private val runner: ProcessRunner) {
         )
     }
 
-    private suspend fun probeOne(spec: ToolSpec): ToolchainInfo {
-        val envPath = spec.envVar?.let { System.getenv(it) }
-        val (available, version) = runner.probe(spec.command, spec.versionArgs)
-        val path = if (available) which(spec.command) else null
+    internal suspend fun probeOne(spec: ToolSpec): ToolchainInfo {
+        // A tool installed outside PATH is normal on Android: the app is told where it lives
+        // through a home variable such as JAVA_HOME. Searching PATH only reported those as
+        // missing even when the executable was there and runnable.
+        val homeExecutable = spec.envVar?.let { variable ->
+            env(variable)?.let { home -> File(File(home, "bin"), spec.command) }
+                ?.takeIf { it.isFile && it.canExecute() }
+        }
+        val command = homeExecutable?.absolutePath ?: spec.command
+        val (available, version) = runner.probe(command, spec.versionArgs)
+        val path = when {
+            !available -> null
+            homeExecutable != null -> homeExecutable.absolutePath
+            else -> which(spec.command)
+        }
         return ToolchainInfo(
             id = spec.id,
             displayName = spec.displayName,
