@@ -306,6 +306,7 @@ private fun NavGraphBuilder.detailDestinations(navController: NavHostController)
             onOpenDatabase = { navController.navigate(TitanRoutes.DATABASE_VIEWER) },
             onOpenPreview = { navController.navigate(TitanRoutes.UI_PREVIEW) },
             onOpenDocs = { navController.navigate(TitanRoutes.DOCS) },
+            gate = LocalContainer.current.capabilityGate,
         )
     }
     composable(TitanRoutes.API_TESTER) { ApiTesterScreen(onBack = { navController.popBackStack() }) }

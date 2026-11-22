@@ -25,6 +25,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import dev.titanide.app.LocalContainer
+import dev.titanide.app.extensions.CapabilityGate
+import dev.titanide.app.extensions.TitanCapability
 import dev.titanide.app.ui.common.TitanTopBar
 import dev.titanide.core.designsystem.TitanColors
 import dev.titanide.core.designsystem.components.TitanCard
@@ -44,7 +47,10 @@ fun ToolsScreen(
     onOpenDatabase: () -> Unit,
     onOpenPreview: () -> Unit,
     onOpenDocs: () -> Unit,
+    gate: CapabilityGate? = null,
 ) {
+    val capabilities = gate ?: LocalContainer.current.capabilityGate
+    val enabled = capabilities.isEnabled(TitanCapability.DEV_TOOLS)
     val tools = listOf(
         ToolEntry(
             "API Tester",
@@ -80,6 +86,23 @@ fun ToolsScreen(
 
     Column(Modifier.fillMaxSize()) {
         TitanTopBar(title = "Developer tools", subtitle = "Project utilities", onBack = onBack)
+        if (!enabled) {
+            TitanCard {
+                Column(Modifier.padding(14.dp)) {
+                    Text(
+                        "${TitanCapability.DEV_TOOLS.label} is switched off in Extensions",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = TitanColors.TextPrimary,
+                    )
+                    Text(
+                        "Turn the Developer Tools extension back on to use these utilities.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TitanColors.TextMuted,
+                    )
+                }
+            }
+            return@Column
+        }
         LazyColumn(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
