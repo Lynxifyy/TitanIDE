@@ -14,6 +14,7 @@ import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Before
@@ -136,6 +137,41 @@ class TerminalSessionTest {
 
         viewModel.nextHistory()
         assertEquals("stepping back down returns the newer entry", "echo two", viewModel.historyEntry())
+    }
+
+    @Test
+    fun `stepping past the newest entry returns to an empty prompt`() {
+        val viewModel = newViewModel()
+        viewModel.runToCompletion("echo one")
+        viewModel.runToCompletion("echo two")
+
+        viewModel.previousHistory()
+        viewModel.previousHistory()
+        assertEquals("echo one", viewModel.historyEntry())
+        viewModel.nextHistory()
+        assertEquals("echo two", viewModel.historyEntry())
+
+        viewModel.nextHistory()
+
+        // A shell drops back to the blank prompt once you walk past the newest entry, so the
+        // user can type something new. Clamping at index 0 left the last command in the field.
+        assertNull("down past the newest entry clears the prompt", viewModel.historyEntry())
+        assertEquals(-1, viewModel.state.value.historyCursor)
+    }
+
+    @Test
+    fun `history browsing cannot drift below the blank prompt`() {
+        val viewModel = newViewModel()
+        viewModel.runToCompletion("echo one")
+
+        // Two presses down with nothing to go down to must leave the cursor at the blank
+        // prompt, not below it: from a cursor of -2 an Up press landed on getOrNull(-1) and
+        // showed an empty field instead of the newest command.
+        viewModel.nextHistory()
+        viewModel.nextHistory()
+        viewModel.previousHistory()
+
+        assertEquals("echo one", viewModel.historyEntry())
     }
 
     @Test

@@ -130,8 +130,13 @@ class TerminalViewModel(private val container: TitanContainer) : ViewModel() {
         _state.update { it.copy(historyCursor = cursor) }
     }
 
+    /**
+     * Walks back towards the blank prompt. `-1` means "nothing recalled", so the cursor stops
+     * there: clamping at 0 kept the newest command in the field and let a later Up press land
+     * below the list and show an empty entry.
+     */
     fun nextHistory() {
-        val cursor = (_state.value.historyCursor - 1).coerceAtMost(0)
+        val cursor = (_state.value.historyCursor - 1).coerceAtLeast(-1)
         _state.update { it.copy(historyCursor = cursor) }
     }
 
