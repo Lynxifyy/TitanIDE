@@ -663,3 +663,76 @@ class TitanIntelligenceModelTest {
         assertEquals(listOf("default-model"), provider.requested)
     }
 }
+
+/**
+ * "Verified" has to mean the code the agent is reporting on, not code it has since changed.
+ * The loop kept `verificationPassed` true after a later `write_file`, so an agent could build
+ * successfully, break the file, and still be reported to the user as a verified success.
+ */
+class AgentVerificationStalenessTest {
+
+    private fun runner(replies: List<String>, tools: List<AgentTool>, maxSteps: Int = 8): AgentRunner {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val provider = ScriptedProvider(replies)
+        return AgentRunner(scope, { provider }, "scripted", AgentToolbox(tools) { _, _ -> true }, maxSteps)
+    }
+
+    private suspend fun awaitFinished(runner: AgentRunner, timeoutMs: Long = 5000): List<AgentEvent> {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (!runner.state.value.running) return runner.state.value.steps
+            kotlinx.coroutines.delay(20)
+        }
+        return runner.state.value.steps
+    }
+
+    @Test
+    fun `an edit after a passing build invalidates the verification`() = runBlocking {
+        val build = FakeTool("run_build", "build", ToolResult(true, "BUILD SUCCESSFUL"))
+        val write = FakeTool("write_file", "write", ToolResult(true, "wrote src/Main.kt"))
+        val runner = runner(
+            listOf(
+                "TOOL: run_build\nARGS: {}",
+                "TOOL: write_file\nARGS: {\"path\":\"src/Main.kt\"}",
+                "DONE: refactored Main.kt",
+            ),
+            listOf(build, write),
+        )
+
+        runner.start("refactor", null)
+        val steps = awaitFinished(runner)
+
+        assertEquals("the build must have run", 1, build.invocations)
+        assertEquals("the edit must have run", 1, write.invocations)
+        val completed = steps.filterIsInstance<AgentEvent.Completed>()
+        assertTrue(
+            "an edit after the build means nothing is verified, but the agent reported: $completed",
+            completed.isEmpty(),
+        )
+        assertTrue(
+            "the user must be told the result is unverified, got: $steps",
+            steps.any { it is AgentEvent.Blocked },
+        )
+    }
+
+    @Test
+    fun `a build after the last edit still counts as verification`() = runBlocking {
+        val build = FakeTool("run_build", "build", ToolResult(true, "BUILD SUCCESSFUL"))
+        val write = FakeTool("write_file", "write", ToolResult(true, "wrote src/Main.kt"))
+        val runner = runner(
+            listOf(
+                "TOOL: write_file\nARGS: {\"path\":\"src/Main.kt\"}",
+                "TOOL: run_build\nARGS: {}",
+                "DONE: refactored Main.kt",
+            ),
+            listOf(build, write),
+        )
+
+        runner.start("refactor", null)
+        val steps = awaitFinished(runner)
+
+        val completed = steps.filterIsInstance<AgentEvent.Completed>()
+        assertEquals("the run must end verified, got: $steps", 1, completed.size)
+        assertTrue("the completion must be marked verified", completed.first().verified)
+    }
+}

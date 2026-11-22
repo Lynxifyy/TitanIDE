@@ -89,6 +89,12 @@ class AgentRunner(
 
     private val verificationTools = setOf("run_build", "run_tests")
 
+    /**
+     * Tools that change the project. A successful build only vouches for the tree as it was,
+     * so any later edit clears the verification and the agent has to build again.
+     */
+    private val mutatingTools = setOf("write_file", "delete_file")
+
     fun start(goal: String, context: AiContext?) {
         if (_state.value.running) return
         _state.value = AgentState(running = true, goal = goal)
@@ -164,9 +170,12 @@ class AgentRunner(
             val result = toolbox.invoke(toolName, args)
             emit(AgentEvent.Observation(step, result.ok, result.output))
 
-            if (toolName in verificationTools) {
-                verificationAttempted = true
-                if (result.ok) verificationPassed = true
+            when {
+                toolName in verificationTools -> {
+                    verificationAttempted = true
+                    verificationPassed = result.ok
+                }
+                toolName in mutatingTools && result.ok -> verificationPassed = false
             }
 
             history += "Step $step: called $toolName -> ${if (result.ok) "success" else "failure"}: " +
