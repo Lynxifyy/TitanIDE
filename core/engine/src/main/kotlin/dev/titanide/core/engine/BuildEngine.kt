@@ -10,6 +10,7 @@ import dev.titanide.core.model.BuildResult
 import dev.titanide.core.model.BuildStage
 import dev.titanide.core.model.BuildStatus
 import dev.titanide.core.model.ExecutionTarget
+import dev.titanide.core.model.TestSummary
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -596,6 +597,12 @@ class BuildEngine(
             }
 
             val parsed = LogParser.parse(outcome.logLines, outcome.exitCode)
+            val reading = reportedTestSummary(request.kind, parsed.testSummary, request.projectPath)
+            val logLines = if (reading.notes.isEmpty()) {
+                outcome.logLines
+            } else {
+                outcome.logLines + reading.notes
+            }
             val finishedAt = System.currentTimeMillis()
             val result = BuildResult(
                 id = buildId,
@@ -605,17 +612,17 @@ class BuildEngine(
                 finishedAt = finishedAt,
                 exitCode = outcome.exitCode,
                 stages = outcome.stages,
-                logLines = outcome.logLines,
+                logLines = logLines,
                 diagnostics = parsed.diagnostics,
                 artifacts = outcome.artifacts,
-                testSummary = parsed.testSummary,
+                testSummary = parsed.testSummary ?: reading.summary,
                 failureReason = outcome.failureReason ?: parsed.failureReason,
                 executorLabel = outcome.executorLabel,
                 projectKind = outcome.projectKind,
             )
 
             _active.value = _active.value - request.projectId
-            _logs.value = _logs.value + (buildId to outcome.logLines)
+            _logs.value = _logs.value + (buildId to logLines)
             _lastResult.value = result
             history.record(result)
             jobs.remove(request.projectId)
@@ -648,3 +655,21 @@ class BuildEngine(
         }
     }
 }
+
+/**
+ * The test results to report for a build.
+ *
+ * Gradle prints only the task name, so a real test run has no summary in the log at all. The
+ * reports it wrote to disk are then the record of what actually ran. A run whose log already
+ * carries a summary keeps it: the log is what the user just watched.
+ */
+internal fun reportedTestSummary(
+    kind: BuildKind,
+    fromLog: TestSummary?,
+    projectPath: String,
+): JUnitReportReader.Reading =
+    if (kind == BuildKind.TEST && fromLog == null) {
+        JUnitReportReader.readAll(File(projectPath))
+    } else {
+        JUnitReportReader.Reading(fromLog)
+    }
