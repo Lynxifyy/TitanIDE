@@ -627,6 +627,14 @@ fun SettingsScreen() {
                             Text("Probing...", style = MaterialTheme.typography.labelSmall, color = TitanColors.TextMuted)
                         }
                     }
+                    state.probeError?.let { failure ->
+                        Text(
+                            failure,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TitanColors.Error,
+                            modifier = Modifier.padding(bottom = 6.dp),
+                        )
+                    }
                     state.toolchains.forEach { tool: ToolchainInfo ->
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),

@@ -8,6 +8,7 @@ import dev.titanide.core.git.auth.GitHubAuthState
 import dev.titanide.core.data.settings.SettingsRepository
 import dev.titanide.core.data.settings.TitanSettings
 import dev.titanide.core.model.ToolchainInfo
+import dev.titanide.core.model.ToolchainReport
 import dev.titanide.core.git.auth.DeviceFlowAuth
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -28,6 +29,8 @@ data class SettingsUiState(
     val settings: TitanSettings? = null,
     val toolchains: List<ToolchainInfo> = emptyList(),
     val probing: Boolean = false,
+    /** Set when the probe itself failed, as opposed to finding nothing. */
+    val probeError: String? = null,
     val gitHubLogin: String? = null,
     val gitHubSignedIn: Boolean = false,
     /** False when this APK was built without TITAN's OAuth client id. */
@@ -40,7 +43,11 @@ data class SettingsUiState(
     val storageUsed: Long = 0,
 )
 
-class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
+class SettingsViewModel(
+    private val container: TitanContainer,
+    /** Seam for tests that need to control what probing returns. */
+    private val probe: suspend () -> ToolchainReport = { container.toolchainProbe.probeAll() },
+) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
@@ -78,8 +85,21 @@ class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
         if (_state.value.probing) return
         _state.update { it.copy(probing = true) }
         viewModelScope.launch {
-            val report = runCatching { container.toolchainProbe.probeAll() }.getOrNull()
-            _state.update { it.copy(toolchains = report?.tools.orEmpty(), probing = false) }
+            try {
+                val report = probe()
+                _state.update { it.copy(toolchains = report.tools, probing = false, probeError = null) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // An empty list is also what a device with nothing installed looks like, so the
+                // reason has to be carried separately or the panel silently lies.
+                _state.update {
+                    it.copy(
+                        probing = false,
+                        probeError = "Toolchain probe failed: ${e.message ?: "unknown error"}",
+                    )
+                }
+            }
         }
     }
 
