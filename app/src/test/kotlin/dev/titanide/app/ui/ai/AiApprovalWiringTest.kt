@@ -100,3 +100,75 @@ class AiApprovalWiringTest {
         )
     }
 }
+
+/**
+ * "Run tests" in AI Studio must say why a run failed. On a device with no JDK or Gradle the
+ * failure is the normal case, and "Tests finished: FAILED" leaves the user with nothing to act
+ * on. The reason is already in the build result, so it belongs in the message.
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
+class AiRunTestsMessageTest {
+
+    @get:Rule
+    val containers = CloseContainersRule()
+
+    private val container = TestContainers.create()
+
+    @Before
+    fun installMainDispatcher() {
+        Dispatchers.setMain(Dispatchers.Default)
+    }
+
+    @After
+    fun restoreMainDispatcher() {
+        ViewModelTracker.clearAll()
+        resetMainDispatcher()
+    }
+
+    private fun scaffold(): dev.titanide.core.model.Project = runBlocking {
+        val wizard = ViewModelTracker.track(
+            dev.titanide.app.ui.create.CreateProjectViewModel(container),
+        )
+        wizard.setName("AiTests")
+        wizard.setPackageName("dev.titanide.aitests")
+        wizard.selectTemplate(
+            dev.titanide.core.templates.TemplateCatalog.all.first {
+                it.category == dev.titanide.core.model.ProjectCategory.BLANK
+            },
+        )
+        wizard.create()
+        val deadline = System.currentTimeMillis() + 20_000
+        while (wizard.state.value.createdProjectId == null && System.currentTimeMillis() < deadline) {
+            Thread.sleep(25)
+        }
+        val id = wizard.state.value.createdProjectId
+            ?: throw AssertionError("scaffold failed: ${wizard.state.value.error}")
+        container.projectRepository.getProject(id)!!
+    }
+
+    @Test
+    fun `a failed test run reports the reason, not just the status`() = runBlocking {
+        val project = scaffold()
+        val viewModel = ViewModelTracker.track(AiViewModel(container))
+        viewModel.selectProject(project.id)
+        withTimeout(20_000) { viewModel.state.first { it.project?.id == project.id } }
+
+        viewModel.runTests()
+
+        val message = withTimeout(180_000) {
+            viewModel.state.first {
+                it.message != null && !it.message!!.startsWith("Running tests")
+            }.message!!
+        }
+        val result = container.buildEngine.lastResult.value
+            ?: throw AssertionError("the run left no build result to explain")
+        val reason = result.failureReason
+            ?: throw AssertionError("a ${result.status} run must record why it failed")
+        assertTrue(
+            "the message must repeat the reason the build gave, but it was: $message",
+            message.contains(reason),
+        )
+    }
+}

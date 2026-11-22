@@ -20,6 +20,7 @@ disabled placeholder.
 | Code editor | Tokenizer, undo stack, incremental diff, search, CodeGuard analysis, project-wide symbol index for go-to-definition / find-references / go-to-symbol | `core/editor` tests |
 | Rename symbol | Token-aware rename across the project, previewed before any write, undoable | `RenamePlannerTest`, `RenameSymbolTest` |
 | Unsaved-work guard | Back button and back gesture save or discard pending edits, never silently drop them | `UnsavedWorkGuardTest`, `EditorActionStripTest` |
+| AI test runs | A failed run repeats the build's reason, so the user can act on it | `AiRunTestsMessageTest` |
 | Test results | JUnit XML from Gradle, Maven and `dotnet test` is read after a test run, newest run only; unreadable reports are named in the build log | `JUnitReportReaderTest`, `ReportedTestSummaryTest` |
 | Project file system | Sandboxed read/write/move/copy, zip-slip hardened extraction | `core/data` `SafeFileSystem` tests |
 | Git | Clone, commit, branch, checkout, merge, push, pull, diff, log via JGit | `core/git` tests |

@@ -13,6 +13,7 @@ import dev.titanide.core.ai.agent.AgentState
 import dev.titanide.core.ai.agent.ToolPolicy
 import dev.titanide.core.model.BuildKind
 import dev.titanide.core.model.BuildRequest
+import dev.titanide.core.model.BuildResult
 import dev.titanide.core.model.ExecutionTarget
 import dev.titanide.core.model.Project
 import kotlinx.coroutines.CompletableDeferred
@@ -328,9 +329,7 @@ class AiViewModel(private val container: TitanContainer) : ViewModel() {
                 ),
             )
             _state.update {
-                it.copy(
-                    message = "Tests finished: ${result.status} ${result.testSummary?.let { "(${it.passed} passed, ${it.failed} failed)" }.orEmpty()}",
-                )
+                it.copy(message = testRunMessage(result))
             }
         }
     }
@@ -417,5 +416,21 @@ class AiViewModel(private val container: TitanContainer) : ViewModel() {
         val snapshot = container.activeFile.current.value
         if (!snapshot.hasFile) return null
         return Triple(snapshot.path.orEmpty(), snapshot.content, snapshot.path.orEmpty())
+    }
+}
+
+/**
+ * What to tell the user after a test run.
+ *
+ * A bare status is not enough: a device without a JDK fails the run for a reason the user can
+ * act on, and that reason is already in the result.
+ */
+private fun testRunMessage(result: BuildResult): String {
+    val counts = result.testSummary?.let { " (${it.passed} passed, ${it.failed} failed)" }.orEmpty()
+    val reason = result.failureReason?.takeIf { it.isNotBlank() }
+    return if (reason == null) {
+        "Tests finished: ${result.status}$counts"
+    } else {
+        "Tests finished: ${result.status}$counts. $reason"
     }
 }
