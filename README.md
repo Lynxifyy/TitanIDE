@@ -19,6 +19,7 @@ disabled placeholder.
 | Project scaffolding | 4 categories, 20+ languages, game mod catalog | `core/templates`, `ProjectScaffolder` tests |
 | Code editor | Tokenizer, undo stack, incremental diff, search, CodeGuard analysis, project-wide symbol index for go-to-definition / find-references / go-to-symbol | `core/editor` tests |
 | Rename symbol | Token-aware rename across the project, previewed before any write, undoable | `RenamePlannerTest`, `RenameSymbolTest` |
+| Unsaved-work guard | Back button and back gesture save or discard pending edits, never silently drop them | `UnsavedWorkGuardTest`, `EditorActionStripTest` |
 | Project file system | Sandboxed read/write/move/copy, zip-slip hardened extraction | `core/data` `SafeFileSystem` tests |
 | Git | Clone, commit, branch, checkout, merge, push, pull, diff, log via JGit | `core/git` tests |
 | GitHub | Device-flow OAuth, repo browse, clone-to-project, remote test | `core/git` + app UI |

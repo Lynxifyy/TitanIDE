@@ -1,9 +1,11 @@
 package dev.titanide.app.ui.workbench
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -23,6 +25,7 @@ import kotlinx.coroutines.runBlocking
 
 import android.os.Looper
 import org.junit.After
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -79,7 +82,7 @@ class EditorActionStripTest {
 
     private lateinit var viewModel: WorkbenchViewModel
 
-    private fun openWorkbenchWithAFile() {
+    private fun openWorkbenchWithAFile(onExit: (() -> Unit)? = null) {
         val container = TestContainers.create()
         val id = "strip-project"
         val created = runBlocking {
@@ -114,11 +117,44 @@ class EditorActionStripTest {
                         viewModel = viewModel,
                         onOpenSettings = {},
                         onOpenProjects = {},
+                        onExitWorkbench = onExit,
                     )
                 }
             }
         }
         compose.waitForIdle()
+    }
+
+    @Test
+    fun leavingWithUnsavedEditsShowsTheSaveDialogInsteadOfDroppingThem() {
+        var exited = false
+        openWorkbenchWithAFile(onExit = { exited = true })
+
+        viewModel.edit("Greeter.kt", source.replace("hello", "goodbye"), source.length)
+        compose.waitForIdle()
+
+        compose.onNodeWithContentDescription("Back to dashboard").performClick()
+        compose.waitForIdle()
+
+        compose.onNodeWithText("Save before leaving?").assertIsDisplayed()
+        compose.onNodeWithText("1 file with edits that are not on disk.").assertIsDisplayed()
+        assertFalse("the exit must wait for the decision", exited)
+    }
+
+    @Test
+    fun discardingFromTheDialogLeaves() {
+        var exited = false
+        openWorkbenchWithAFile(onExit = { exited = true })
+
+        viewModel.edit("Greeter.kt", source.replace("hello", "goodbye"), source.length)
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Back to dashboard").performClick()
+        compose.waitForIdle()
+
+        compose.onNodeWithText("Discard").performClick()
+        compose.waitForIdle()
+
+        assertTrue("discarding must leave the workbench", exited)
     }
 
     private val actions = listOf(

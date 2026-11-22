@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Upload
+import androidx.activity.compose.BackHandler
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -39,6 +40,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +50,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.titanide.core.designsystem.TitanColors
@@ -92,6 +95,8 @@ fun WorkbenchScreen(
     val revealToken by viewModel.revealRequests.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val pendingClose by viewModel.pendingClose.collectAsStateWithLifecycle()
+    val pendingExit by viewModel.pendingExit.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
     val build by viewModel.build.collectAsStateWithLifecycle()
     val logs by viewModel.buildLogs.collectAsStateWithLifecycle()
     val agent by viewModel.agent.collectAsStateWithLifecycle()
@@ -110,6 +115,15 @@ fun WorkbenchScreen(
 
     var prompt by remember { mutableStateOf<NamePrompt?>(null) }
 
+    // The system back gesture is the exit path a phone user actually reaches for, so it has
+    // to run the same unsaved-edits check as the title bar button.
+    if (onExitWorkbench != null) {
+        BackHandler {
+            if (pendingExit) viewModel.cancelExit()
+            else if (viewModel.requestExit()) onExitWorkbench()
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -124,7 +138,7 @@ fun WorkbenchScreen(
         Column(Modifier.fillMaxSize()) {
             WorkbenchTitleBar(
                 projectName = state.projectName,
-                onExit = onExitWorkbench,
+                onExit = onExitWorkbench?.let { exit -> { if (viewModel.requestExit()) exit() } },
                 onOpenProjects = onOpenProjects,
                 onToggleAgent = viewModel::toggleAgentPanel,
                 agentConnected = agent.isConnected,
@@ -433,6 +447,56 @@ fun WorkbenchScreen(
             dismissButton = {
                 TextButton(onClick = viewModel::cancelPendingClose) {
                     Text("Keep editing", color = TitanColors.Primary)
+                }
+            },
+        )
+    }
+
+    if (pendingExit && onExitWorkbench != null) {
+        val unsaved = viewModel.unsavedPaths()
+        AlertDialog(
+            onDismissRequest = viewModel::cancelExit,
+            title = { Text("Save before leaving?", style = MaterialTheme.typography.titleMedium) },
+            text = {
+                Column {
+                    Text(
+                        text = "${unsaved.size} file" + (if (unsaved.size == 1) "" else "s") +
+                            " with edits that are not on disk.",
+                        color = TitanColors.TextMuted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    // Naming the files is the point: the user cannot judge "discard" otherwise.
+                    unsaved.take(6).forEach { path ->
+                        Text(path, color = TitanColors.TextPrimary, fontSize = 11.sp)
+                    }
+                    if (unsaved.size > 6) {
+                        Text(
+                            "and ${unsaved.size - 6} more",
+                            color = TitanColors.TextMuted,
+                            fontSize = 11.sp,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch { if (viewModel.saveAndExit()) onExitWorkbench() }
+                }) {
+                    Text("Save and leave", color = TitanColors.Primary)
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        viewModel.discardAndExit()
+                        onExitWorkbench()
+                    }) {
+                        Text("Discard", color = TitanColors.Error)
+                    }
+                    TextButton(onClick = viewModel::cancelExit) {
+                        Text("Keep editing", color = TitanColors.TextMuted)
+                    }
                 }
             },
         )

@@ -181,6 +181,10 @@ class WorkbenchViewModel(
     private val _pendingClose = MutableStateFlow<String?>(null)
     val pendingClose: StateFlow<String?> = _pendingClose.asStateFlow()
 
+    /** True while leaving the workbench is waiting on the unsaved-edits decision. */
+    private val _pendingExit = MutableStateFlow(false)
+    val pendingExit: StateFlow<Boolean> = _pendingExit.asStateFlow()
+
     private val _installInProgress = MutableStateFlow(false)
     val installInProgress: StateFlow<Boolean> = _installInProgress.asStateFlow()
 
@@ -344,6 +348,55 @@ class WorkbenchViewModel(
         }
     }
 
+    /** Every buffer whose text is not on disk, in tab order. */
+    fun unsavedPaths(): List<String> = _state.value.activeGroup.tabs
+        .map { it.path }
+        .filter { hasUnsavedChanges(it) }
+
+    /**
+     * Asks to leave the workbench.
+     *
+     * Returns true when the caller may navigate away immediately. Otherwise the edits are
+     * only in memory, so the exit waits for [saveAndExit] or [discardAndExit].
+     */
+    fun requestExit(): Boolean {
+        if (unsavedPaths().isEmpty()) {
+            _pendingExit.value = false
+            return true
+        }
+        _pendingExit.value = true
+        return false
+    }
+
+    /**
+     * Writes every dirty buffer, then reports whether the exit may proceed.
+     *
+     * A write that fails keeps the prompt open: the alternative is navigating away from text
+     * the user believes was saved.
+     */
+    suspend fun saveAndExit(): Boolean {
+        val paths = unsavedPaths()
+        var allWritten = true
+        for (path in paths) {
+            val content = _buffers.value[path]?.content ?: continue
+            if (!saveNow(path, content, silent = true)) allWritten = false
+        }
+        if (!allWritten) return false
+        _pendingExit.value = false
+        _message.value = "Saved ${paths.size} file${if (paths.size == 1) "" else "s"}"
+        return true
+    }
+
+    /** Abandons the unsaved edits and leaves. Only reachable from the exit prompt. */
+    fun discardAndExit() {
+        _pendingExit.value = false
+        for (path in unsavedPaths()) forgetPath(path)
+    }
+
+    fun cancelExit() {
+        _pendingExit.value = false
+    }
+
     fun closeTab(tabId: String) {
         // Closing drops the buffer, so unsaved edits would go with it and nothing else holds
         // them. Ask first; discardAndCloseTab is the confirmed path.
@@ -496,26 +549,42 @@ class WorkbenchViewModel(
     }
 
     fun save(path: String, silent: Boolean = false) {
-        val project = _project.value ?: return
         val buffer = _buffers.value[path] ?: return
-        if (!buffer.dirty) return
+        if (buffer.content == buffer.savedContent) return
+        // The text is captured here, not inside the coroutine: a launch can start after the
+        // user typed again, and writing that newer text would report it saved while the buffer
+        // has already moved on.
         val written = buffer.content
-        viewModelScope.launch {
-            when (val result = container.fileTreeRepository.write(project, path, written)) {
-                is SafeFileSystem.Result.Ok -> {
-                    // Only the text that was written counts as saved. If the user typed while
-                    // the write was in flight the buffer has moved on, and marking it clean
-                    // would skip the next auto-save and lose that text when the tab closes.
-                    _buffers.update { buffers ->
-                        val latest = buffers[path] ?: return@update buffers
-                        buffers + (path to latest.copy(savedContent = written))
-                    }
-                    val stillSaved = _buffers.value[path]?.content == written
-                    _state.value = _state.value.setDirty(path, !stillSaved)
-                    if (!silent) _message.value = "Saved ${path.substringAfterLast('/')}"
-                }
+        viewModelScope.launch { saveNow(path, written, silent) }
+    }
 
-                is SafeFileSystem.Result.Failure -> _message.value = "Save failed: ${result.reason}"
+    /**
+     * Writes [written] to [path] and reports whether the bytes reached the disk.
+     *
+     * The caller decides what a failure means: the exit guard must stay open, while an
+     * auto-save just shows the message.
+     */
+    private suspend fun saveNow(path: String, written: String, silent: Boolean): Boolean {
+        val project = _project.value ?: return false
+        _buffers.value[path] ?: return true
+        return when (val result = container.fileTreeRepository.write(project, path, written)) {
+            is SafeFileSystem.Result.Ok -> {
+                // Only the text that was written counts as saved. If the user typed while
+                // the write was in flight the buffer has moved on, and marking it clean
+                // would skip the next auto-save and lose that text when the tab closes.
+                _buffers.update { buffers ->
+                    val latest = buffers[path] ?: return@update buffers
+                    buffers + (path to latest.copy(savedContent = written))
+                }
+                val stillSaved = _buffers.value[path]?.content == written
+                _state.value = _state.value.setDirty(path, !stillSaved)
+                if (!silent) _message.value = "Saved ${path.substringAfterLast('/')}"
+                true
+            }
+
+            is SafeFileSystem.Result.Failure -> {
+                _message.value = "Save failed: ${result.reason}"
+                false
             }
         }
     }
