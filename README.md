@@ -23,6 +23,7 @@ disabled placeholder.
 | AI test runs | A failed run repeats the build's reason, so the user can act on it | `AiRunTestsMessageTest` |
 | Test results | JUnit XML from Gradle, Maven and `dotnet test` is read after a test run, newest run only; unreadable reports are named in the build log | `JUnitReportReaderTest`, `ReportedTestSummaryTest` |
 | Terminal | Real `sh` processes per session, streamed output, real exit codes, persistent `cd` | `TerminalSessionTest`, `LiveTerminalTest` |
+| API tester | Real OkHttp requests; status, headers, body and transport errors come from the wire | `ApiTesterLiveTest` |
 | Project file system | Sandboxed read/write/move/copy, zip-slip hardened extraction | `core/data` `SafeFileSystem` tests |
 | Git | Clone, commit, branch, checkout, merge, push, pull, diff, log via JGit | `core/git` tests |
 | GitHub | Device-flow OAuth, repo browse, clone-to-project, remote test | `core/git` + app UI |
