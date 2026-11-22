@@ -51,9 +51,10 @@ class HomeViewModel(private val container: TitanContainer) : ViewModel() {
             }
         }
         viewModelScope.launch {
+            val storageUsed = container.storageUsedBytes()
             _state.update {
                 it.copy(
-                    storageUsed = container.storageUsedBytes(),
+                    storageUsed = storageUsed,
                     gitHubConnected = container.isGitHubSignedIn(),
                     aiConfigured = container.currentSettings()?.ai?.providerId?.let { it != "none" && it.isNotBlank() }
                         ?: false,
@@ -79,9 +80,10 @@ class HomeViewModel(private val container: TitanContainer) : ViewModel() {
 
     fun refreshStatus() {
         viewModelScope.launch {
+            val storageUsed = container.storageUsedBytes()
             _state.update {
                 it.copy(
-                    storageUsed = container.storageUsedBytes(),
+                    storageUsed = storageUsed,
                     gitHubConnected = container.isGitHubSignedIn(),
                     aiConfigured = container.currentSettings()?.ai?.providerId?.let { it != "none" && it.isNotBlank() }
                         ?: false,

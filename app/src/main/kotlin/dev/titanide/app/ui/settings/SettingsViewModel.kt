@@ -67,7 +67,8 @@ class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
         }
         viewModelScope.launch {
             refreshGitHubIdentity()
-            _state.update { it.copy(storageUsed = container.storageUsedBytes()) }
+            val storageUsed = container.storageUsedBytes()
+            _state.update { it.copy(storageUsed = storageUsed) }
         }
         probeToolchains()
     }

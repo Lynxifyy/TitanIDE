@@ -49,6 +49,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
@@ -405,7 +406,13 @@ class TitanContainer(
 
     fun buildSuccessRate(): Flow<Double> = flow { emit(buildHistory.successRate()) }
 
-    fun storageUsedBytes(): Long = storage.usedBytes()
+    /**
+     * Bytes used by the app's own directories. Overridable so a test can observe which thread
+     * performs the walk without creating a large tree on disk.
+     */
+    var storageProbe: () -> Long = { storage.usedBytes() }
+
+    suspend fun storageUsedBytes(): Long = withContext(Dispatchers.IO) { storageProbe() }
 
     fun currentSettings(): TitanSettings? = settingsState.value
 
