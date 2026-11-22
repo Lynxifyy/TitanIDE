@@ -504,21 +504,29 @@ private fun EditorStatusStrip(
             StatusChip("No problems", TitanColors.Success)
         }
         Spacer(Modifier.weight(1f))
-        // Undo has to be reachable by touch: a phone has no Ctrl+Z, and an edit that cannot be
-        // taken back is not usable.
-        ActionChip("Undo", onUndo)
-        ActionChip("Redo", onRedo)
-        // Navigation has to be tappable for the same reason: there is no F12 on a phone.
-        ActionChip("Definition", onGoToDefinition)
-        ActionChip("References", onFindReferences)
-        ActionChip("Rename", onRename)
-        ActionChip("Find", onFind)
-        ActionChip("Comment", onToggleComment)
-        ActionChip("Format", onFormat)
-        // The soft keyboard has no Tab key, so indenting a block needs these.
-        ActionChip("Outdent", { onIndent(true) })
-        ActionChip("Indent", { onIndent(false) })
-        ActionChip(if (buffer.dirty) "Save *" else "Saved", onSave)
+        // The actions scroll rather than wrap: at 320dp the strip is wider than the screen, and
+        // an action pushed past the right edge cannot be tapped at all.
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            // Undo has to be reachable by touch: a phone has no Ctrl+Z, and an edit that
+            // cannot be taken back is not usable.
+            ActionChip("Undo", onUndo)
+            ActionChip("Redo", onRedo)
+            // Navigation has to be tappable for the same reason: there is no F12 on a phone.
+            ActionChip("Definition", onGoToDefinition)
+            ActionChip("References", onFindReferences)
+            ActionChip("Rename", onRename)
+            ActionChip("Find", onFind)
+            ActionChip("Comment", onToggleComment)
+            ActionChip("Format", onFormat)
+            // The soft keyboard has no Tab key, so indenting a block needs these.
+            ActionChip("Outdent", { onIndent(true) })
+            ActionChip("Indent", { onIndent(false) })
+            ActionChip(if (buffer.dirty) "Save *" else "Saved", onSave)
+        }
     }
 }
 
