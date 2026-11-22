@@ -217,10 +217,14 @@ class WorkbenchViewModel(
         }
         viewModelScope.launch {
             container.settings.settings.collect { settings ->
+                val appearanceFontSize = settings.editor.fontSize.coerceIn(8, 32)
                 _appearance.value = EditorAppearance(
                     // Clamped so a corrupt persisted value cannot make the editor unreadable.
-                    fontSizeSp = settings.editor.fontSize.coerceIn(8, 32),
-                    lineHeightSp = settings.editor.lineHeight.coerceIn(12, 48),
+                    fontSizeSp = appearanceFontSize,
+                    // Bounded by the font size for the same reason the store does it: the
+                    // height is meaningful only relative to the glyph height.
+                    lineHeightSp = settings.editor.lineHeight
+                        .coerceIn(appearanceFontSize, appearanceFontSize * 2),
                     wordWrap = settings.editor.wordWrap,
                     showLineNumbers = settings.editor.showLineNumbers,
                     highlightCurrentLine = settings.editor.highlightCurrentLine,

@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import dev.titanide.app.di.TitanContainer
 import dev.titanide.core.data.security.CredentialKey
 import dev.titanide.core.git.auth.GitHubAuthState
+import dev.titanide.core.data.settings.SettingsRepository
 import dev.titanide.core.data.settings.TitanSettings
 import dev.titanide.core.model.ToolchainInfo
 import dev.titanide.core.git.auth.DeviceFlowAuth
@@ -355,22 +356,29 @@ class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
     }
 
     /**
-     * Line height is set relative to the font, not in absolute sp: a fixed height would
-     * crowd the glyphs once the font size changes.
+     * Line height is stored as an absolute sp value, so it has to be recomputed from the
+     * percentage whenever the font size moves: leaving it alone rescaled the spacing the user
+     * had chosen, and the settings chips showed a different percentage than the one selected.
      */
     fun setEditorLineSpacing(percent: Int) {
         viewModelScope.launch {
             container.settings.updateEditor { editor ->
-                val clamped = percent.coerceIn(100, 200)
                 editor.copy(
-                    lineHeight = (editor.fontSize * clamped / 100).coerceAtLeast(editor.fontSize),
+                    lineSpacingPercent = percent.coerceIn(
+                        SettingsRepository.MIN_LINE_SPACING_PERCENT,
+                        SettingsRepository.MAX_LINE_SPACING_PERCENT,
+                    ),
                 )
             }
         }
     }
 
     fun setEditorFontSize(size: Int) {
-        viewModelScope.launch { container.settings.updateEditor { it.copy(fontSize = size.coerceIn(9, 28)) } }
+        viewModelScope.launch {
+            container.settings.updateEditor {
+                it.copy(fontSize = size.coerceIn(SettingsRepository.MIN_FONT_SIZE, SettingsRepository.MAX_FONT_SIZE))
+            }
+        }
     }
 
     fun setCodeGuard(enabled: Boolean) {
@@ -396,4 +404,5 @@ class SettingsViewModel(private val container: TitanContainer) : ViewModel() {
     fun clearMessage() {
         _state.update { it.copy(message = null) }
     }
+
 }

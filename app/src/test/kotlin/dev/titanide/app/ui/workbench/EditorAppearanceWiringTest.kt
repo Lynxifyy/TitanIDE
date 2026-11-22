@@ -55,14 +55,14 @@ class EditorAppearanceWiringTest {
 
     @Test
     fun `font size and line height come from settings`() = runBlocking {
-        runBlocking { container.settings.updateEditor { it.copy(fontSize = 18, lineHeight = 26) } }
+        runBlocking { container.settings.updateEditor { it.copy(fontSize = 18, lineSpacingPercent = 144) } }
 
         val viewModel = viewModel()
         val appearance = withTimeout(10_000) {
             viewModel.appearance.first { it.fontSizeSp == 18 }
         }
         assertEquals(18, appearance.fontSizeSp)
-        assertEquals(26, appearance.lineHeightSp)
+        assertEquals("144% of 18sp", 25, appearance.lineHeightSp)
     }
 
     @Test
@@ -81,14 +81,19 @@ class EditorAppearanceWiringTest {
 
     @Test
     fun `an out of range font size is clamped rather than applied`() = runBlocking {
-        runBlocking { container.settings.updateEditor { it.copy(fontSize = 400, lineHeight = 1) } }
+        runBlocking { container.settings.updateEditor { it.copy(fontSize = 400, lineSpacingPercent = 1) } }
 
         val viewModel = viewModel()
         val appearance = withTimeout(10_000) {
             viewModel.appearance.first { it.fontSizeSp == 32 }
         }
         assertEquals("a corrupt value must not make the editor unreadable", 32, appearance.fontSizeSp)
-        assertEquals(12, appearance.lineHeightSp)
+        assertEquals(
+            "the line height is bounded relative to the font, so a nonsense value becomes " +
+                "single spacing rather than text overlapping itself",
+            32,
+            appearance.lineHeightSp,
+        )
     }
 
     /**

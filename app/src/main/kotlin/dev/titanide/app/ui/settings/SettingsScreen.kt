@@ -50,6 +50,7 @@ import dev.titanide.app.ui.common.TitanTopBar
 import dev.titanide.app.ui.common.formatBytes
 import dev.titanide.core.designsystem.TitanColors
 import dev.titanide.core.data.settings.EditorSettings
+import dev.titanide.core.data.settings.SettingsRepository
 import dev.titanide.core.designsystem.components.StatusPill
 import dev.titanide.core.designsystem.components.TitanCard
 import dev.titanide.core.model.ExecutionTarget
@@ -661,11 +662,10 @@ fun SettingsScreen() {
     }
 }
 
-/**
- * The stored line height as a percentage of the font size, which is what the chips show.
- * Derived rather than stored so it stays correct when the font size changes.
- */
-private fun lineSpacingPercent(editor: EditorSettings?): Int {
-    if (editor == null || editor.fontSize <= 0) return 130
-    return (editor.lineHeight * 100 / editor.fontSize).coerceIn(100, 200)
-}
+/** The stored line spacing, clamped to the range the chips offer. */
+private fun lineSpacingPercent(editor: EditorSettings?): Int =
+    (editor?.lineSpacingPercent ?: SettingsRepository.DEFAULT_LINE_SPACING_PERCENT)
+        .coerceIn(
+            SettingsRepository.MIN_LINE_SPACING_PERCENT,
+            SettingsRepository.MAX_LINE_SPACING_PERCENT,
+        )

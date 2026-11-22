@@ -17,7 +17,7 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 
 data class EditorSettings(
     val fontSize: Int = 13,
-    val lineHeight: Int = 20,
+    val lineSpacingPercent: Int = 150,
     val tabWidth: Int = 4,
     val wordWrap: Boolean = false,
     val showLineNumbers: Boolean = true,
@@ -25,7 +25,16 @@ data class EditorSettings(
     val autoSaveDelayMs: Long = 1500,
     val codeGuardEnabled: Boolean = true,
     val highlightCurrentLine: Boolean = true,
-)
+) {
+    /**
+     * Line height in sp, derived from the percentage rather than stored.
+     *
+     * It used to be stored as an absolute height, which cannot represent a percentage exactly:
+     * 175% of a 9sp font is 15.75sp, so the value came back as 15 and the setting showed 166%.
+     * Deriving it means the percentage the user picked is the value that comes back.
+     */
+    val lineHeight: Int get() = (fontSize * lineSpacingPercent / 100).coerceAtLeast(fontSize)
+}
 
 data class AiSettings(
     val providerId: String = "none",
@@ -75,7 +84,8 @@ class SettingsRepository(private val context: Context) {
 
     private object Keys {
         val fontSize = intPreferencesKey("editor_font_size")
-        val lineHeight = intPreferencesKey("editor_line_height")
+        val lineSpacing = intPreferencesKey("editor_line_spacing_percent")
+        val legacyLineHeight = intPreferencesKey("editor_line_height")
         val tabWidth = intPreferencesKey("editor_tab_width")
         val wordWrap = booleanPreferencesKey("editor_word_wrap")
         val lineNumbers = booleanPreferencesKey("editor_line_numbers")
@@ -110,10 +120,11 @@ class SettingsRepository(private val context: Context) {
     }
 
     val settings: Flow<TitanSettings> = context.dataStore.data.map { prefs ->
+        val fontSize = prefs[Keys.fontSize] ?: 13
         TitanSettings(
             editor = EditorSettings(
-                fontSize = prefs[Keys.fontSize] ?: 13,
-                lineHeight = prefs[Keys.lineHeight] ?: 20,
+                fontSize = fontSize,
+                lineSpacingPercent = prefs[Keys.lineSpacing] ?: legacyPercent(prefs[Keys.legacyLineHeight], fontSize),
                 tabWidth = prefs[Keys.tabWidth] ?: 4,
                 wordWrap = prefs[Keys.wordWrap] ?: false,
                 showLineNumbers = prefs[Keys.lineNumbers] ?: true,
@@ -154,9 +165,11 @@ class SettingsRepository(private val context: Context) {
     suspend fun updateEditor(block: (EditorSettings) -> EditorSettings) {
         val current = settingsSnapshot().editor
         val next = block(current)
+        val fontSize = next.fontSize.coerceIn(MIN_FONT_SIZE, MAX_FONT_SIZE)
         context.dataStore.edit { prefs ->
-            prefs[Keys.fontSize] = next.fontSize.coerceIn(8, 32)
-            prefs[Keys.lineHeight] = next.lineHeight.coerceIn(12, 48)
+            prefs[Keys.fontSize] = fontSize
+            prefs[Keys.lineSpacing] = next.lineSpacingPercent
+                .coerceIn(MIN_LINE_SPACING_PERCENT, MAX_LINE_SPACING_PERCENT)
             prefs[Keys.tabWidth] = next.tabWidth.coerceIn(2, 8)
             prefs[Keys.wordWrap] = next.wordWrap
             prefs[Keys.lineNumbers] = next.showLineNumbers
@@ -189,6 +202,24 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.ghWorkflow] = next.githubWorkflow
             prefs[Keys.keepLogs] = next.keepLogsDays
         }
+    }
+
+    /**
+     * Turns the old absolute height into a percentage, so a value saved before the setting
+     * became percentage-based keeps the spacing it looked like.
+     */
+    private fun legacyPercent(legacyHeight: Int?, fontSize: Int): Int {
+        if (legacyHeight == null || fontSize <= 0) return DEFAULT_LINE_SPACING_PERCENT
+        return (legacyHeight * 100 / fontSize)
+            .coerceIn(MIN_LINE_SPACING_PERCENT, MAX_LINE_SPACING_PERCENT)
+    }
+
+    companion object {
+        const val MIN_FONT_SIZE = 8
+        const val MAX_FONT_SIZE = 32
+        const val MIN_LINE_SPACING_PERCENT = 100
+        const val MAX_LINE_SPACING_PERCENT = 200
+        const val DEFAULT_LINE_SPACING_PERCENT = 150
     }
 
     suspend fun updateOpenCode(block: (OpenCodeSettings) -> OpenCodeSettings) {

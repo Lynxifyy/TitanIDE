@@ -47,12 +47,25 @@ class EditorSettingsRoundTripTest {
     }
 
     @Test
-    fun `line height round trips so spacing chips reflect the real value`() = runTest {
+    fun `line spacing round trips so the chips reflect the real value`() = runTest {
         val settings = SettingsRepository(context)
-        settings.updateEditor { it.copy(fontSize = 20, lineHeight = 30) }
+        settings.updateEditor { it.copy(fontSize = 20, lineSpacingPercent = 150) }
         val editor = settings.settings.first().editor
         assertEquals(20, editor.fontSize)
-        assertEquals(30, editor.lineHeight)
+        assertEquals(150, editor.lineSpacingPercent)
+        assertEquals("the height the editor draws is derived from the percentage", 30, editor.lineHeight)
+    }
+
+    @Test
+    fun `a percentage that has no exact pixel height still round trips`() = runTest {
+        val settings = SettingsRepository(context)
+        settings.updateEditor { it.copy(fontSize = 9, lineSpacingPercent = 175) }
+        val editor = settings.settings.first().editor
+        assertEquals(
+            "175% of 9sp is 15.75sp; storing pixels rounded it away and the chip read 166%",
+            175,
+            editor.lineSpacingPercent,
+        )
     }
 
     @Test
