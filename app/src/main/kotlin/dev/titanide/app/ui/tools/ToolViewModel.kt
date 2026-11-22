@@ -49,7 +49,11 @@ class ToolViewModel(private val container: TitanContainer) : ViewModel() {
             container.projectRepository.observeProjects().collect { projects ->
                 val project = _state.value.project ?: projects.maxByOrNull { it.lastOpenedAt }
                 _state.update { it.copy(projects = projects, project = project) }
-                if (project != null && _state.value.assets.isEmpty() && _state.value.documents.isEmpty()) {
+                if (project == null) {
+                    // Nothing to scan. Leaving loading set told the screens to show "Scanning..."
+                    // indefinitely on a fresh install with no projects.
+                    _state.update { it.copy(loading = false) }
+                } else if (_state.value.assets.isEmpty() && _state.value.documents.isEmpty()) {
                     scan(project)
                 }
             }
@@ -139,20 +143,34 @@ class ToolViewModel(private val container: TitanContainer) : ViewModel() {
     fun openTable(name: String) {
         viewModelScope.launch {
             val rows = withContext(Dispatchers.IO) {
+                val dao = container.database
                 when (name) {
-                    "projects" -> container.database.projectDao().all().map {
+                    "projects" -> dao.projectDao().all().map {
                         "${it.name} | ${it.categoryId} | ${it.buildSystemId} | ${it.lastOpenedAt}"
                     }
-                    "builds" -> container.database.buildDao().all().map {
+                    "builds" -> dao.buildDao().all().map {
                         "${it.kind} | ${it.status} | ${it.testsPassed}/${it.testsTotal} | ${it.startedAt}"
                     }
-                    else -> emptyList()
+                    "open_tabs" -> dao.tabDao().all().map {
+                        "${it.filePath} | project ${it.projectId} | caret ${it.caretOffset} | order ${it.orderIndex}"
+                    }
+                    "extensions" -> dao.extensionDao().all().map {
+                        "${it.name} | ${it.version} | ${it.kind} | ${if (it.enabled) "enabled" else "disabled"}"
+                    }
+                    "http_requests" -> dao.httpRequestDao().all().map {
+                        "${it.method} ${it.url} | ${it.updatedAt}"
+                    }
+                    else -> null
                 }
             }
             _state.update {
                 it.copy(
                     openTable = name,
-                    tableRows = rows.ifEmpty { listOf("No rows in $name.") },
+                    tableRows = when {
+                        rows == null -> listOf("There is no table named $name.")
+                        rows.isEmpty() -> listOf("$name is empty.")
+                        else -> rows
+                    },
                 )
             }
         }

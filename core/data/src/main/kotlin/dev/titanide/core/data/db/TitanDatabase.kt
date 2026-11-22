@@ -185,6 +185,9 @@ interface TabDao {
 
     @Query("SELECT COUNT(*) FROM open_tabs")
     suspend fun count(): Int
+
+    @Query("SELECT * FROM open_tabs ORDER BY orderIndex ASC")
+    suspend fun all(): List<OpenTabEntity>
 }
 
 @Dao
@@ -194,6 +197,9 @@ interface ExtensionDao {
 
     @Query("SELECT COUNT(*) FROM extensions")
     suspend fun count(): Int
+
+    @Query("SELECT * FROM extensions ORDER BY name ASC")
+    suspend fun all(): List<ExtensionEntity>
 
     @Query("SELECT * FROM extensions WHERE id = :id")
     suspend fun findById(id: String): ExtensionEntity?
@@ -215,6 +221,9 @@ interface HttpRequestDao {
 
     @Query("SELECT COUNT(*) FROM http_requests")
     suspend fun count(): Int
+
+    @Query("SELECT * FROM http_requests ORDER BY updatedAt DESC")
+    suspend fun all(): List<HttpRequestEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(request: HttpRequestEntity)
