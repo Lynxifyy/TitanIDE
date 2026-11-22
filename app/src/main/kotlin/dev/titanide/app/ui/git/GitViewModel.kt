@@ -257,5 +257,30 @@ class GitViewModel(
         }
     }
 
+    /** Merges [name] into the current branch. Conflicts are reported, never swallowed. */
+    fun merge(name: String) {
+        val root = requireRoot() ?: return
+        if (name == _state.value.branch) {
+            feedback(error = "$name is already checked out")
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(busy = true) }
+            feedback()
+            when (val outcome = container.gitService.merge(root, name)) {
+                is Outcome.Ok -> {
+                    _state.update { it.copy(busy = false) }
+                    feedback(message = "Merged $name into ${_state.value.branch}")
+                    refresh()
+                }
+                is Outcome.Failed -> {
+                    _state.update { it.copy(busy = false) }
+                    feedback(error = outcome.reason)
+                    refresh()
+                }
+            }
+        }
+    }
+
     fun clearFeedback() = feedback()
 }

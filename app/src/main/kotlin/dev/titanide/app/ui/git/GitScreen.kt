@@ -30,6 +30,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -270,7 +271,21 @@ fun GitScreen(projectId: String, onBack: () -> Unit) {
                             modifier = Modifier.weight(1f),
                         )
                         if (branch.isDefault) StatusPill("default", TitanColors.TextMuted)
-                        if (branch.name == state.branch) StatusPill("HEAD", TitanColors.Success)
+                        if (branch.name == state.branch) {
+                            StatusPill("HEAD", TitanColors.Success)
+                        } else {
+                            TextButton(
+                                onClick = { viewModel.merge(branch.name) },
+                                enabled = !state.busy,
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp),
+                            ) {
+                                Text(
+                                    "Merge",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TitanColors.Secondary,
+                                )
+                            }
+                        }
                     }
                 }
             }

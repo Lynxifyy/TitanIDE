@@ -10,6 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.api.MergeCommand
+import org.eclipse.jgit.api.MergeResult
 import org.eclipse.jgit.api.ResetCommand
 import org.eclipse.jgit.api.errors.GitAPIException
 import org.eclipse.jgit.diff.DiffEntry
@@ -229,18 +230,36 @@ class GitRepositoryService {
         }.fold({ Outcome.Ok(Unit) }, { Outcome.Failed(describe("checkout", it)) })
     }
 
+    /**
+     * Merges [branch] into the current one. A merge that stops on a conflict is reported as a
+     * failure naming the conflicted paths: `Ok(false)` told the caller nothing it could show
+     * the user, and a conflict leaves the working tree needing manual resolution.
+     */
     suspend fun merge(root: File, branch: String): Outcome<Boolean> = withContext(Dispatchers.IO) {
         val repo = open(root) ?: return@withContext Outcome.Failed("Not a Git repository")
         runCatching {
-            val result = Git(repo).use { git ->
-                git.merge()
-                    .include(repo.resolve(branch))
+            val ref = repo.resolve(branch)
+                ?: error("Unknown branch '$branch'")
+            Git(repo).use { git ->
+                val result = git.merge()
+                    .include(ref)
                     .setFastForward(MergeCommand.FastForwardMode.FF)
                     .call()
+                when (result.mergeStatus) {
+                    MergeResult.MergeStatus.MERGED,
+                    MergeResult.MergeStatus.FAST_FORWARD,
+                    MergeResult.MergeStatus.ALREADY_UP_TO_DATE,
+                    -> true
+                    MergeResult.MergeStatus.CONFLICTING,
+                    MergeResult.MergeStatus.FAILED,
+                    -> error(
+                        "Merge stopped on a conflict in " +
+                            result.conflicts.keys.joinToString(", ").ifBlank { "(unknown paths)" } +
+                            ". Resolve the files, then stage and commit.",
+                    )
+                    else -> error("Merge did not complete: ${result.mergeStatus}")
+                }
             }
-            result.mergeStatus == org.eclipse.jgit.api.MergeResult.MergeStatus.MERGED ||
-                result.mergeStatus == org.eclipse.jgit.api.MergeResult.MergeStatus.FAST_FORWARD ||
-                result.mergeStatus == org.eclipse.jgit.api.MergeResult.MergeStatus.ALREADY_UP_TO_DATE
         }.fold({ Outcome.Ok(it) }, { Outcome.Failed(describe("merge", it)) })
     }
 

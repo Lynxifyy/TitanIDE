@@ -185,3 +185,82 @@ class GitRepositoryServiceTest {
         assertEquals("keep", File(dest, "existing.txt").readText())
     }
 }
+
+/**
+ * A merge that stops on a conflict is not a successful merge. The service returned
+ * `Ok(false)` for it, which the caller can only distinguish from `Ok(true)` by knowing the
+ * convention, and `MergeStatus.CONFLICTING` was not the only failure mode either: a stopped
+ * merge reports `FAILED`, and neither surfaced which files were left conflicted.
+ */
+class GitMergeConflictTest {
+
+    @get:Rule
+    val temp = TemporaryFolder()
+
+    private val service = GitRepositoryService()
+
+    private fun <T> unwrap(outcome: GitRepositoryService.Outcome<T>): T = when (outcome) {
+        is GitRepositoryService.Outcome.Ok -> outcome.value
+        is GitRepositoryService.Outcome.Failed -> throw AssertionError("git failed: ${outcome.reason}")
+    }
+
+    private suspend fun repoWithBranches(): File {
+        val root = temp.newFolder("merge-repo")
+        unwrap(service.init(root))
+        File(root, "Main.kt").writeText("fun main() { println(1) }\n")
+        unwrap(service.stage(root, listOf("Main.kt")))
+        unwrap(service.commit(root, "base", null, null))
+
+        unwrap(service.createBranch(root, "feature", checkout = true))
+        File(root, "Main.kt").writeText("fun main() { println(2) }\n")
+        unwrap(service.stage(root, listOf("Main.kt")))
+        unwrap(service.commit(root, "feature change", null, null))
+
+        unwrap(service.checkout(root, "master").let { it })
+        File(root, "Main.kt").writeText("fun main() { println(3) }\n")
+        unwrap(service.stage(root, listOf("Main.kt")))
+        unwrap(service.commit(root, "main change", null, null))
+        return root
+    }
+
+    @Test
+    fun `a conflicting merge reports the conflicted files`() = runBlocking {
+        val root = repoWithBranches()
+
+        val outcome = service.merge(root, "feature")
+
+        val failure = outcome as? GitRepositoryService.Outcome.Failed
+            ?: throw AssertionError("a conflicting merge must not report success: $outcome")
+        assertTrue(
+            "the failure must name the conflicted file, got: ${failure.reason}",
+            failure.reason.contains("Main.kt"),
+        )
+        assertTrue(
+            "the failure must say the merge stopped, got: ${failure.reason}",
+            failure.reason.contains("conflict", ignoreCase = true),
+        )
+    }
+
+    @Test
+    fun `a clean merge reports success`() = runBlocking {
+        val root = temp.newFolder("clean-repo")
+        unwrap(service.init(root))
+        File(root, "README.md").writeText("base\n")
+        unwrap(service.stage(root, listOf("README.md")))
+        unwrap(service.commit(root, "base", null, null))
+
+        unwrap(service.createBranch(root, "feature", checkout = true))
+        File(root, "Feature.kt").writeText("fun feature() {}\n")
+        unwrap(service.stage(root, listOf("Feature.kt")))
+        unwrap(service.commit(root, "feature", null, null))
+        unwrap(service.checkout(root, "master"))
+
+        unwrap(service.merge(root, "feature"))
+
+        val status = unwrap(service.status(root))
+        assertTrue(
+            "the merged file must be in the tree, status: $status",
+            File(root, "Feature.kt").exists(),
+        )
+    }
+}
