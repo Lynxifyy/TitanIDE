@@ -189,6 +189,15 @@ fun HomeScreen(
                     }
                 }
             } else {
+                state.probeError?.let { reason ->
+                    item {
+                        Text(
+                            text = reason,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TitanColors.Error,
+                        )
+                    }
+                }
                 item { ToolchainSummary(state.toolchains, onOpenSettings) }
             }
 

@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import dev.titanide.app.di.TitanContainer
 import dev.titanide.core.model.Project
 import dev.titanide.core.model.ToolchainInfo
+import dev.titanide.core.model.ToolchainReport
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,12 +19,18 @@ data class HomeState(
     val storageUsed: Long = 0,
     val toolchains: List<ToolchainInfo> = emptyList(),
     val probingToolchains: Boolean = false,
+    /** Why the last probe failed, or null. An empty [toolchains] alone also means "nothing installed". */
+    val probeError: String? = null,
     val gitHubConnected: Boolean = false,
     val aiConfigured: Boolean = false,
     val loading: Boolean = true,
 )
 
-class HomeViewModel(private val container: TitanContainer) : ViewModel() {
+class HomeViewModel(
+    private val container: TitanContainer,
+    /** Seam for tests that need to control what probing returns. */
+    private val probe: suspend () -> ToolchainReport = { container.toolchainProbe.probeAll() },
+) : ViewModel() {
 
     private val _state = MutableStateFlow(HomeState())
     val state: StateFlow<HomeState> = _state.asStateFlow()
@@ -68,12 +75,21 @@ class HomeViewModel(private val container: TitanContainer) : ViewModel() {
         if (_state.value.probingToolchains) return
         _state.update { it.copy(probingToolchains = true) }
         viewModelScope.launch {
-            val report = runCatching { container.toolchainProbe.probeAll() }.getOrNull()
-            _state.update {
-                it.copy(
-                    toolchains = report?.tools.orEmpty(),
-                    probingToolchains = false,
-                )
+            try {
+                val report = probe()
+                _state.update {
+                    it.copy(toolchains = report.tools, probingToolchains = false, probeError = null)
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        toolchains = emptyList(),
+                        probingToolchains = false,
+                        probeError = "Toolchain probe failed: ${e.message ?: "unknown error"}",
+                    )
+                }
             }
         }
     }
