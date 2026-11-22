@@ -17,6 +17,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Before
 import org.junit.Test
@@ -198,6 +199,55 @@ class GitFeedbackTest {
      * view simply refreshed, so a file that could not be staged reappeared as unstaged with no
      * explanation. Every other action reports its failure.
      */
+    /**
+     * The merge action existed on the service but nowhere in the UI, and the service reported a
+     * conflicting merge as a plain success (`Ok(false)`). A conflict leaves the working tree
+     * half-merged, so the screen has to say so.
+     */
+    @Test
+    fun `a conflicting merge is reported instead of looking successful`() = runBlocking {
+        val viewModel = initialisedRepository()
+        val project = container.projectRepository.getProject(projectId)!!
+        val root = File(project.rootPath)
+
+        File(root, "Conflict.txt").writeText("base\n")
+        container.gitService.stage(root, listOf("Conflict.txt"))
+        container.gitService.commit(root, "base", null, null)
+
+        container.gitService.createBranch(root, "feature", checkout = true)
+        File(root, "Conflict.txt").writeText("feature\n")
+        container.gitService.stage(root, listOf("Conflict.txt"))
+        container.gitService.commit(root, "feature", null, null)
+        container.gitService.checkout(root, "master")
+
+        File(root, "Conflict.txt").writeText("main\n")
+        container.gitService.stage(root, listOf("Conflict.txt"))
+        container.gitService.commit(root, "main", null, null)
+
+        viewModel.merge("feature")
+
+        val deadline = System.currentTimeMillis() + 20_000
+        while (viewModel.state.value.error == null && System.currentTimeMillis() < deadline) {
+            Thread.sleep(25)
+        }
+        val error = viewModel.state.value.error
+        assertNotNull("a merge that stopped on a conflict must not look like a success", error)
+        assertTrue(
+            "the error must name the conflicted file, got: $error",
+            error!!.contains("Conflict.txt"),
+        )
+    }
+
+    @Test
+    fun `merging the checked out branch is refused`() = runBlocking {
+        val viewModel = initialisedRepository()
+        val branch = viewModel.state.value.branch
+
+        viewModel.merge(branch!!)
+
+        assertEquals("$branch is already checked out", viewModel.state.value.error)
+    }
+
     @Test
     fun `a failed stage is reported instead of being ignored`() = runBlocking {
         val viewModel = initialisedRepository()

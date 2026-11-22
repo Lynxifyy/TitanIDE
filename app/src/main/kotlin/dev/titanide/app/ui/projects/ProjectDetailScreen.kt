@@ -181,14 +181,24 @@ fun ProjectDetailScreen(
                 }
             }
 
+            state.error?.let { message ->
+                Text(
+                    message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TitanColors.Error,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                )
+            }
+
             OutlinedButton(
                 onClick = { confirmDelete = true },
+                enabled = !state.deleting,
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
             ) {
                 Icon(Icons.Filled.Delete, contentDescription = null, tint = TitanColors.Error, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Delete project", color = TitanColors.Error)
+                Text(if (state.deleting) "Deleting..." else "Delete project", color = TitanColors.Error)
             }
         }
     }

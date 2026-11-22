@@ -10,7 +10,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.io.File
 
 data class ProjectDetailState(
     val project: Project? = null,
@@ -18,6 +17,8 @@ data class ProjectDetailState(
     val sizeBytes: Long = 0,
     val buildHistory: List<BuildRecordEntity> = emptyList(),
     val loading: Boolean = true,
+    val deleting: Boolean = false,
+    val error: String? = null,
 )
 
 class ProjectDetailViewModel(
@@ -32,10 +33,7 @@ class ProjectDetailViewModel(
         viewModelScope.launch {
             val project = container.projectRepository.getProject(projectId)
             val fileCount = container.projectRepository.projectFileCount(projectId)
-            val size = project?.let { p ->
-                val dir = File(p.rootPath)
-                if (dir.exists()) dir.walkTopDown().filter { it.isFile }.sumOf { it.length() } else 0L
-            } ?: 0L
+            val size = project?.let { container.projectSizeBytes(it) } ?: 0L
             _state.update {
                 it.copy(
                     project = project,
@@ -56,10 +54,31 @@ class ProjectDetailViewModel(
         viewModelScope.launch { container.projectRepository.touch(projectId) }
     }
 
+    /**
+     * Deletes the project and leaves the screen only when the files are actually gone. The
+     * repository keeps the row when the directory cannot be removed, so navigating back
+     * regardless would return the user to a list the project is still in.
+     */
     fun delete(onDeleted: () -> Unit) {
+        if (_state.value.deleting) return
+        _state.update { it.copy(deleting = true, error = null) }
         viewModelScope.launch {
-            container.projectRepository.deleteProject(projectId)
-            onDeleted()
+            val deleted = container.projectDeleter(projectId)
+            if (deleted) {
+                onDeleted()
+                return@launch
+            }
+            val name = _state.value.project?.name ?: "the project"
+            _state.update {
+                it.copy(
+                    deleting = false,
+                    error = "Could not delete $name: files are still on disk",
+                )
+            }
         }
+    }
+
+    fun clearError() {
+        _state.update { it.copy(error = null) }
     }
 }

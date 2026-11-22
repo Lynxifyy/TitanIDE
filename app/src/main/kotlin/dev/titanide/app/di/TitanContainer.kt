@@ -38,6 +38,7 @@ import dev.titanide.core.git.api.GitHubApiClient
 import dev.titanide.core.git.auth.DeviceFlowAuth
 import dev.titanide.core.git.local.GitRepositoryService
 import dev.titanide.core.model.ExecutionTarget
+import dev.titanide.core.model.Project
 import dev.titanide.core.opencode.session.OpenCodeSession
 import dev.titanide.core.opencode.setup.DiscoveryOutcome
 import dev.titanide.core.opencode.setup.OpenCodeDiscovery
@@ -55,6 +56,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
+import java.io.File
 import java.io.IOException
 
 /**
@@ -413,6 +415,18 @@ class TitanContainer(
     var storageProbe: () -> Long = { storage.usedBytes() }
 
     suspend fun storageUsedBytes(): Long = withContext(Dispatchers.IO) { storageProbe() }
+
+    /** Bytes used by one project's directory. Overridable so a test can observe the thread. */
+    var projectSizeProbe: suspend (Project) -> Long = { project ->
+        val dir = File(project.rootPath)
+        if (dir.exists()) dir.walkTopDown().filter { it.isFile }.sumOf { it.length() } else 0L
+    }
+
+    suspend fun projectSizeBytes(project: Project): Long =
+        withContext(Dispatchers.IO) { projectSizeProbe(project) }
+
+    /** Overridable so a test can force the failure path without an unwritable directory. */
+    var projectDeleter: suspend (String) -> Boolean = { id -> projectRepository.deleteProject(id) }
 
     fun currentSettings(): TitanSettings? = settingsState.value
 
