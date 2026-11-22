@@ -1,6 +1,7 @@
 package dev.titanide.app.testing
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -59,6 +60,11 @@ object ViewModelTracker {
             stores.clear()
             copy
         }
+        // The store's own ViewModels have to be captured before clear(), which empties the map.
+        // ViewModelStore.clear() only *requests* cancellation and returns, so joining their
+        // scope jobs afterwards is the step that keeps a Room query from outliving the database.
+        val storeOwned = owners.flatMap { owner -> runCatching { owner.viewModelStore.viewModels() }.getOrDefault(emptyList()) }
+        val storeJobs = storeOwned.mapNotNull { it.scopeJob() }
         owners.forEach { owner -> runCatching { owner.viewModelStore.clear() } }
 
         val pending = synchronized(live) {
@@ -68,11 +74,20 @@ object ViewModelTracker {
         }
         // Capture the scope jobs first: clear() only *requests* cancellation, and a Room query
         // still in flight would then race the database close in a later teardown step.
-        val jobs = pending.mapNotNull { viewModel ->
-            runCatching { viewModel.viewModelScope.coroutineContext[Job] }.getOrNull()
-        }
+        val jobs = storeJobs + pending.mapNotNull { it.scopeJob() }
         pending.forEach { viewModel -> clearMethod.invoke(viewModel) }
         runBlocking { withTimeoutOrNull(5_000) { jobs.forEach { it.join() } } }
+    }
+
+    private fun ViewModel.scopeJob(): Job? =
+        runCatching { viewModelScope.coroutineContext[Job] }.getOrNull()
+
+    /** `ViewModelStore` exposes no accessor for its instances, only put/get/keys/clear. */
+    private fun ViewModelStore.viewModels(): List<ViewModel> {
+        val field = ViewModelStore::class.java.getDeclaredField("map").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val map = field.get(this) as? Map<String, ViewModel> ?: return emptyList()
+        return map.values.toList()
     }
 }
 
