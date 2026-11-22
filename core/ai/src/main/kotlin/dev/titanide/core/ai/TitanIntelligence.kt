@@ -78,7 +78,7 @@ class EditApplier(
 class TitanIntelligence(
     private val scope: CoroutineScope,
     private val providerProvider: () -> AiProvider,
-    private val model: String,
+    private val modelProvider: () -> String,
     private val contextBuilder: ContextBuilder,
     private val files: FileTreeRepository,
     val editApplier: EditApplier,
@@ -156,7 +156,8 @@ class TitanIntelligence(
         val runner = AgentRunner(
             scope = scope,
             provider = providerProvider,
-            model = model,
+            // The runner is built per run, so the value current at start time is correct.
+            model = modelProvider(),
             toolbox = toolbox,
         )
         agentRunner = runner
@@ -180,7 +181,7 @@ class TitanIntelligence(
             val provider = providerProvider()
             val result = provider.chat(
                 ChatRequest(
-                    model = model.ifBlank { provider.models.firstOrNull().orEmpty() },
+                    model = modelProvider().ifBlank { provider.models.firstOrNull().orEmpty() },
                     messages = messages,
                 ),
             )

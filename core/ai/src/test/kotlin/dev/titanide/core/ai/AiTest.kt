@@ -570,7 +570,7 @@ class TitanIntelligenceFailureTest {
         return TitanIntelligence(
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
             providerProvider = { provider },
-            model = "throwing",
+            modelProvider = { "throwing" },
             contextBuilder = ContextBuilder(files),
             files = files,
             editApplier = EditApplier(files),
@@ -588,5 +588,78 @@ class TitanIntelligenceFailureTest {
             (outcome as AiOutcome.Failure).reason.contains("socket closed"),
         )
         assertFalse("the busy flag must be released", intelligence.busy.value)
+    }
+}
+
+/**
+ * The model the user picks in Settings has to be the model the provider is asked for. The
+ * container passed the value it read at construction time, so a model changed after the app
+ * had already built the intelligence facade was ignored for the life of the process.
+ */
+class TitanIntelligenceModelTest {
+
+    private class RecordingProvider : AiProvider {
+        override val id = "recording"
+        override val displayName = "Recording"
+        override val requiresApiKey = false
+        override val supportsStreaming = false
+        override val models = listOf("default-model")
+        val requested = mutableListOf<String>()
+        override suspend fun chat(request: ChatRequest): ChatResult {
+            requested += request.model
+            return ChatResult.Success(ChatResponse(content = "ok", model = request.model))
+        }
+    }
+
+    private fun intelligence(provider: AiProvider, model: () -> String): Pair<TitanIntelligence, Project> {
+        val root = kotlin.io.path.createTempDirectory("ai-model").toFile()
+        val project = Project(
+            id = "p1",
+            name = "Model",
+            packageName = "dev.titanide.model",
+            rootPath = root.absolutePath,
+            category = ProjectCategory.BLANK,
+            templateId = "blank",
+            languages = listOf(Language.KOTLIN),
+            buildSystem = BuildSystem.NONE,
+            createdAt = 0L,
+            lastOpenedAt = 0L,
+        )
+        val files = FileTreeRepository()
+        return TitanIntelligence(
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            providerProvider = { provider },
+            modelProvider = model,
+            contextBuilder = ContextBuilder(files),
+            files = files,
+            editApplier = EditApplier(files),
+        ) to project
+    }
+
+    @Test
+    fun `a model chosen after construction is the model that is requested`() = runBlocking {
+        val provider = RecordingProvider()
+        var configured = "first-model"
+        val (intelligence, project) = intelligence(provider) { configured }
+
+        intelligence.chat(project, listOf(ChatMessage(ChatMessage.Role.USER, "hi")), includeContext = false)
+        configured = "second-model"
+        intelligence.chat(project, listOf(ChatMessage(ChatMessage.Role.USER, "hi")), includeContext = false)
+
+        assertEquals(
+            "the second request must use the model the user just picked",
+            listOf("first-model", "second-model"),
+            provider.requested,
+        )
+    }
+
+    @Test
+    fun `a blank model falls back to the provider's first model`() = runBlocking {
+        val provider = RecordingProvider()
+        val (intelligence, project) = intelligence(provider) { "" }
+
+        intelligence.chat(project, listOf(ChatMessage(ChatMessage.Role.USER, "hi")), includeContext = false)
+
+        assertEquals(listOf("default-model"), provider.requested)
     }
 }

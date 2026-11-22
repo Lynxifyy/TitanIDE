@@ -223,7 +223,9 @@ class TitanContainer(
         TitanIntelligence(
             scope = appScope,
             providerProvider = { aiProviderState.value },
-            model = settingsState.value?.ai?.model.orEmpty(),
+            // Read on every request: the user can change the model in Settings at any time,
+            // and this facade is built once for the process lifetime.
+            modelProvider = { settingsState.value?.ai?.model.orEmpty() },
             contextBuilder = contextBuilder,
             files = fileTreeRepository,
             editApplier = editApplier,

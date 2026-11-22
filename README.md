@@ -29,7 +29,7 @@ disabled placeholder.
 | GitHub | Device-flow OAuth, repo browse, clone-to-project, remote test | `core/git` + app UI |
 | Build engine | Local, remote agent and GitHub Actions backends | `core/engine` tests |
 | Remote build agent | Real HTTP service, sandboxed subprocess execution | `backend/agent`, 19 tests |
-| AI | Provider abstraction, project context builder, edit applier | `core/ai` tests |
+| AI | Provider abstraction, project context builder, edit applier; the model chosen in Settings is read per request, so changing it takes effect without a restart | `core/ai` tests, `TitanIntelligenceModelTest` |
 | Extensions | Built-in catalogue with a real toggle; the switch and the capability gate agree, and every gated capability is checked where the feature is used | `ExtensionToggleStateTest`, `CapabilityGateTest` |
 | Developer tools | API tester, Asset Studio, Database Viewer, UI Preview and Docs read real project and database data; a table that is counted can be opened and its row count matches | `DatabaseViewerTest` |
 | Persistence | Room (projects, builds, tabs, extensions, HTTP history), DataStore settings | `core/data` tests |
