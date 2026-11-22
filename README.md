@@ -28,6 +28,7 @@ disabled placeholder.
 | Git | Clone, commit, branch, checkout, merge, push, pull, diff, log via JGit | `core/git` tests |
 | GitHub | Device-flow OAuth, repo browse, clone-to-project, remote test | `core/git` + app UI |
 | Build engine | Local, remote agent and GitHub Actions backends | `core/engine` tests |
+| Toolchain detection | Resolves a tool through its home variable (`JAVA_HOME`, `ANDROID_HOME`), not just `PATH`; a probe that fails says why on both the dashboard and Settings instead of showing an empty list | `ToolchainProbeTest`, `HomeToolchainProbeTest`, `SettingsToolchainProbeTest` |
 | Remote build agent | Real HTTP service, sandboxed subprocess execution | `backend/agent`, 19 tests |
 | AI | Provider abstraction, project context builder, edit applier; the model chosen in Settings is read per request, so changing it takes effect without a restart | `core/ai` tests, `TitanIntelligenceModelTest` |
 | AI agent | Autonomous plan/act/observe loop that refuses to report success without a passing build or test, and clears that pass again if it edits the code afterwards | `AgentVerificationStalenessTest`, `AgentRunnerTest` |
