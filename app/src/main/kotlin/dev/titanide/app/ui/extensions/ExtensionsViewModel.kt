@@ -132,14 +132,20 @@ class ExtensionsViewModel(private val container: TitanContainer) : ViewModel() {
             container.database.extensionDao().observeAll().collect { stored ->
                 val byId = stored.associateBy { it.id }
                 val enabled = ExtensionsUiState.BUILT_INS.associate { ext ->
-                    ext.id to (if (ext.alwaysOn) true else byId[ext.id]?.enabled ?: false)
+                    ext.id to (if (ext.alwaysOn) true else byId[ext.id]?.enabled ?: true)
                 }
                 _state.update { it.copy(enabled = enabled, loading = false) }
             }
         }
     }
 
-    /** Persists the toggle. Always-on extensions are core code and cannot be disabled. */
+    /**
+     * Persists the toggle. Always-on extensions are core code and cannot be disabled.
+     *
+     * An extension with no stored row shows as enabled because that is what the capability
+     * gate answers for it: a fresh install keeps every feature, and the switch must not claim
+     * otherwise.
+     */
     fun setEnabled(extension: BuiltInExtension, enabled: Boolean) {
         if (extension.alwaysOn) {
             _state.update { it.copy(message = "${extension.name} is built into TITAN and cannot be disabled") }
